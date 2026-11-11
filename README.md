@@ -3,11 +3,16 @@
 Prototipo jugable con 3 niveles (Otoño, Desierto, Primavera), mago low-poly, enemigos numéricos decorativos,
 montañas como límite del mapa, río/mar con colisión, menú de niveles, mapa (M) y HUD de zona.
 
+## Clonar
+```bash
+git clone https://github.com/HectorYa/Desarrolo_videojuegos.git
+```
+La rama `main` ya contiene el proyecto completo (Assets, escenas, scripts y settings).
+
 ## Abrir
-1. Unity Hub > Add > "Add project from disk" > elige la carpeta `MageHeroUnity` (Editor 6000.3.23f1).
-2. Al abrir aparece "Mage Hero": pulsa **Generar ahora** (tarda unos minutos).
-   Si lo cierras: `Tools > Mage Hero > Build Everything (agua = bloqueo)`.
-   Esto crea: capas y matriz de colisión, URP Asset (si falta), prefab del mago, 3 escenas de nivel, MainMenu y Build Settings.
+1. Unity Hub > Add > "Add project from disk" > elige la carpeta clonada `Desarrolo_videojuegos` (Editor 6000.3.23f1).
+2. La primera vez Unity regenera la carpeta `Library` (tarda 1-2 min). Todas las escenas y assets ya están incluidos.
+   Si algo falta o quieres regenerarlo todo: `Tools > Mage Hero > Build Everything (agua = bloqueo)`.
 3. Abre `Assets/MageHero/Scenes/MainMenu.unity` y pulsa Play.
 
 Alternativa: crea un proyecto 3D (URP) y importa `MageHero.unitypackage` (Assets > Import Package > Custom Package). Requiere Input System y uGUI.
