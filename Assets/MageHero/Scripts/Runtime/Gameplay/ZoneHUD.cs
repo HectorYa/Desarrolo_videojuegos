@@ -24,7 +24,7 @@ namespace MageHero
 
         void Update()
         {
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame && !UIManager.BlocksEscape) SceneManager.LoadScene(menuScene);
+            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame && !UIManager.BlocksEscape && !MapOverlay.BlocksEscape) SceneManager.LoadScene(menuScene);
             if (info == null || player == null) return;
 
             string best = info.levelName; float bd = detectRadius;

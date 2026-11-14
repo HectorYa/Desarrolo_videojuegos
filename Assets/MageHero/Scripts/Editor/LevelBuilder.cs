@@ -41,6 +41,15 @@ namespace MageHero.Editor
         // =============================================================== ENTRADA
         public static string ScenePath(string levelId) { return AssetLib.Root + "/Scenes/Level_" + levelId + ".unity"; }
         public static string PreviewPath(string levelId) { return AssetLib.Gen + "/" + levelId + "/Preview.png"; }
+        public static string MapPath(string levelId) { return AssetLib.Gen + "/" + levelId + "/Map.png"; }
+        const int MapResolution = 1024;
+
+        /// Regenera solo la textura del mapa (mismo archivo y GUID), sin tocar la escena del nivel.
+        public static void RegenerateMapTexture(LevelDef def)
+        {
+            World.Configure(def);
+            MakeMapTexture(def, MapResolution, MapPath(def.id), null);
+        }
 
         public static void BuildLevel(LevelDef def, WaterPolicy policy)
         {
@@ -71,7 +80,8 @@ namespace MageHero.Editor
             BuildStructures();
             BuildEnemies();
 
-            var map = MakeMapTexture(def, 512, AssetLib.Gen + "/" + id + "/Map.png", dots);
+            // Los enemigos se dibujan en vivo en el mapa (MapOverlay); la textura solo lleva el terreno.
+            var map = MakeMapTexture(def, MapResolution, MapPath(id), null);
             MakeMapTexture(def, 256, PreviewPath(id), null);
             var player = BuildPlayerAndCamera();
             BuildUI(player, map);

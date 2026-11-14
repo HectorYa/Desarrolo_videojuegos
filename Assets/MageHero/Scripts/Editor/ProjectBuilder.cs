@@ -29,6 +29,15 @@ namespace MageHero.Editor
         [MenuItem("Tools/Mage Hero/Rebuild/Nivel Primavera")]
         public static void RebuildPrimavera() { RebuildLevel(LevelData.Primavera()); }
 
+        /// Solo regenera las texturas de los mapas (tecla M) sin reconstruir las escenas ni perder sus cambios.
+        [MenuItem("Tools/Mage Hero/Rebuild/Texturas de mapa (sin tocar escenas)")]
+        public static void RebuildMapTextures()
+        {
+            foreach (var d in LevelData.All()) LevelBuilder.RegenerateMapTexture(d);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[MageHero] Texturas de mapa regeneradas (" + LevelData.All().Length + " niveles).");
+        }
+
         static void Prepare()
         {
             EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo();

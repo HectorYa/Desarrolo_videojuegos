@@ -315,10 +315,13 @@ namespace MageHero.Editor
             Anchor((RectTransform)menuBtn.transform, new Vector2(1, 0), new Vector2(1, 0), new Vector2(1, 0), new Vector2(-14, 66), new Vector2(150, 40));
 
             // Panel del mapa completo
+            // (MapOverlay reconstruye este panel con el diseño final al iniciar; esto es solo el respaldo en la escena.)
             var mapPanel = UIImg("MapPanel", hud.transform, new Color(.04f, .08f, .14f, .8f)); Fill(mapPanel.rectTransform, 0, 0, 0, 0);
+            // El marco va como hermano ANTERIOR al mapa: si fuera hijo se dibujaría encima y taparía la textura.
+            var frame = UIImg("Frame", mapPanel.transform, GoldC); frame.raycastTarget = false;
+            Anchor(frame.rectTransform, new Vector2(.5f, .5f), new Vector2(.5f, .5f), new Vector2(.5f, .5f), Vector2.zero, new Vector2(650, 650));
             var mapRaw = UIR("Map", mapPanel.transform); var raw = mapRaw.gameObject.AddComponent<RawImage>(); raw.texture = map;
             Anchor(mapRaw, new Vector2(.5f, .5f), new Vector2(.5f, .5f), new Vector2(.5f, .5f), Vector2.zero, new Vector2(640, 640));
-            var frame = UIImg("Frame", mapRaw, GoldC); frame.raycastTarget = false; Fill(frame.rectTransform, -5, -5, -5, -5); frame.transform.SetAsFirstSibling();
             foreach (var z in L.zones)
             {
                 var pill = UIImg("Zone_" + z.name, mapRaw, new Color(Navy.r, Navy.g, Navy.b, .92f)); pill.raycastTarget = false;
