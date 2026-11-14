@@ -8,9 +8,10 @@ namespace MageHero
     public static class GameLayers
     {
         public const string Player = "Player", Environment = "Environment", Obstacles = "Obstacles",
-                            Water = "Water", MapBounds = "MapBounds", Enemies = "Enemies";
+                            Water = "Water", MapBounds = "MapBounds", Enemies = "Enemies",
+                            Projectiles = "Projectiles";
 
-        public static readonly string[] All = { Player, Environment, Obstacles, Water, MapBounds, Enemies };
+        public static readonly string[] All = { Player, Environment, Obstacles, Water, MapBounds, Enemies, Projectiles };
 
         // Pares que SÍ colisionan. Cualquier otro par entre estas capas se ignora.
         // (Player-Water debe estar activo: los volúmenes de agua son triggers y la matriz también los filtra.)
@@ -18,6 +19,8 @@ namespace MageHero
         {
             { Player,  Environment }, { Player,  Obstacles }, { Player, MapBounds }, { Player, Water }, { Player, Enemies },
             { Enemies, Environment }, { Enemies, Obstacles }, { Enemies, MapBounds },
+            // Hechizos: golpean enemigos y se deshacen contra terreno/obstáculos/bordes. Ignoran al jugador y al agua.
+            { Projectiles, Enemies }, { Projectiles, Environment }, { Projectiles, Obstacles }, { Projectiles, MapBounds },
         };
 
         public static int Index(string layerName) => LayerMask.NameToLayer(layerName);
