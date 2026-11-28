@@ -16,7 +16,7 @@ namespace MageHero
         public string displayName = "JEFE";
         [Tooltip("Mostrar el nombre también en enemigos normales (p. ej. Mago oscuro).")]
         public bool showName;
-        [Tooltip("Oscurecer el color según el nivel. Desactivado en jefes con colores propios (Dragón Blanco…).")]
+        [Tooltip("Oscurecer el color según el nivel. Desactivado en jefes con colores propios (Azhar, Hidrakhan…).")]
         public bool applyTint = true;
 
         public int Level => level;

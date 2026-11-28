@@ -1,184 +1,286 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace MageHero
 {
-    /// Jefes dragón (nivel 2: Dragón Blanco, nivel 3: Dragón Oscuro). Construidos con piezas low-poly:
-    /// cuerpo, cuello, cabeza con mandíbula, cuernos, alas que aletean, cola que ondula y patas.
-    ///  - Vuela bajo y mantiene la distancia (retrocede si el mago se acerca).
-    ///  - Abre la boca, carga fuego y lanza una ráfaga de bolas de fuego en abanico hacia donde estará el mago.
+    /// Jefes dragón construidos con DragonKit (mallas low poly facetadas con escamas):
+    ///  - Nivel 2 Desierto · AZHAR: wyvern de una cabeza. Vuela bajo y lanza abanicos de fuego; a mitad de vida
+    ///    aterriza levantando polvo, se acerca por tierra y gira para barrer con la maza de la cola.
+    ///  - Nivel 3 Costa Chatarra · HIDRAKHAN: dragón de varias cabezas (hielo y fuego). Cada cabeza apunta y ataca
+    ///    por su cuenta (bolas de fuego / esquirlas de hielo); con poca vida atacan todas a la vez.
+    /// Animación procedural: aleteo con bajada rápida, respiración, cuellos que se balancean, mandíbulas, cola
+    /// ondulante y pasos. La piel destella al recibir un golpe.
     [RequireComponent(typeof(HealthSystem))]
     public class DragonBoss : MonoBehaviour
     {
-        public float fireballDamage = 14f, cooldown = 3.2f, fireballSpeed = 14f;
-        public int fireballsPerVolley = 3;
+        public float fireballDamage = 14f, iceDamage = 9f, cooldown = 3.2f, fireballSpeed = 14f, iceSpeed = 19f;
+        public int fireballsPerVolley = 3, shardsPerVolley = 5;
         public float spreadDegrees = 10f;
         public float minRange = 5f, maxRange = 26f, keepAway = 6f;
-        public Color fireCore = new Color(1f, 0.85f, 0.4f), fireGlow = new Color(1f, 0.45f, 0.1f);
-        public const float HoverHeight = 2.2f;
+        public bool landsInPhase2;        // Azhar
+        public bool headsTogetherLowHp;   // Hidrakhan
+        public float tailDamage = 20f;
+        public float roarPitch = 1f;
+        public const float HoverHeight = 2.4f;
 
-        Transform model, neck, head, jaw, mouth, wingL, wingR;
-        readonly List<Transform> tail = new List<Transform>();
-        FinalBoss boss; EnemyAI3D ai; HealthSystem hs; Transform player;
-        float nextFire, chargeT = -1f;
-        int shotsLeft; float nextShot;
-        GameObject mouthGlow;
+        class HeadState
+        {
+            public DragonHeadRig rig;
+            public float chargeT = -1f, nextShot;
+            public int shotsLeft;
+            public GameObject glow;
+            public bool Busy => chargeT >= 0f || shotsLeft > 0;
+        }
+
+        DragonRig rig;
+        readonly List<HeadState> heads = new List<HeadState>();
+        FinalBoss boss; EnemyAI3D ai; HealthSystem hs; Transform player; CapsuleCollider col;
+        float size = 1f, groundHeight;
+        float nextFire, nextSwipe, flash, flapPhase, stepPhase, swipeYaw;
+        int nextHead;
+        bool flying = true, busy, roared, phase2;
         Vector3 lastPos;
         int groundMask, obstacleMask;
 
         // ------------------------------------------------------------------ construcción
-        public static DragonBoss Build(GameObject root, Color body, Color belly, Color wing, Color eye, Color fireCore, Color fireGlow)
+        public static DragonBoss Build(GameObject root, DragonSpec spec)
         {
             var d = root.AddComponent<DragonBoss>();
-            d.fireCore = fireCore; d.fireGlow = fireGlow;
-            var mBody = RuntimeMaterials.Toon(body);
-            var mBelly = RuntimeMaterials.Toon(belly);
-            var mWing = RuntimeMaterials.Toon(wing);
-            var mHorn = RuntimeMaterials.Toon(Color.Lerp(belly, Color.white, 0.4f));
-            var mEye = RuntimeMaterials.Glow(eye);
-
-            d.model = BossKit.Pivot(root.transform, "Modelo", new Vector3(0f, HoverHeight, 0f));
-            BossKit.Part(d.model, "Cuerpo", PrimitiveType.Sphere, Vector3.zero, new Vector3(1.6f, 1.3f, 2.8f), mBody);
-            BossKit.Part(d.model, "Vientre", PrimitiveType.Sphere, new Vector3(0f, -0.25f, 0.1f), new Vector3(1.3f, 1f, 2.3f), mBelly);
-            for (int i = 0; i < 5; i++)
-                BossKit.Part(d.model, "Pua" + i, PrimitiveType.Cube, new Vector3(0f, 0.62f - Mathf.Abs(i - 1.5f) * 0.04f, 1f - i * 0.5f), new Vector3(0.18f, 0.3f, 0.18f), mWing, new Vector3(45f, 0f, 45f));
-
-            // Cuello y cabeza
-            d.neck = BossKit.Pivot(d.model, "Cuello", new Vector3(0f, 0.35f, 1.2f));
-            for (int i = 1; i <= 3; i++)
-                BossKit.Part(d.neck, "Vertebra" + i, PrimitiveType.Sphere, new Vector3(0f, 0.32f * i, 0.4f * i), Vector3.one * (0.85f - i * 0.07f), mBody);
-            d.head = BossKit.Pivot(d.neck, "Cabeza", new Vector3(0f, 1.25f, 1.45f));
-            BossKit.Part(d.head, "Craneo", PrimitiveType.Cube, new Vector3(0f, 0f, 0.15f), new Vector3(0.85f, 0.62f, 1f), mBody);
-            BossKit.Part(d.head, "Hocico", PrimitiveType.Cube, new Vector3(0f, -0.06f, 0.82f), new Vector3(0.6f, 0.38f, 0.65f), mBody);
-            BossKit.Part(d.head, "CuernoI", PrimitiveType.Cylinder, new Vector3(-0.25f, 0.42f, -0.2f), new Vector3(0.12f, 0.42f, 0.12f), mHorn, new Vector3(-45f, 0f, 15f));
-            BossKit.Part(d.head, "CuernoD", PrimitiveType.Cylinder, new Vector3(0.25f, 0.42f, -0.2f), new Vector3(0.12f, 0.42f, 0.12f), mHorn, new Vector3(-45f, 0f, -15f));
-            BossKit.Part(d.head, "OjoI", PrimitiveType.Cube, new Vector3(-0.3f, 0.12f, 0.55f), new Vector3(0.06f, 0.1f, 0.16f), mEye);
-            BossKit.Part(d.head, "OjoD", PrimitiveType.Cube, new Vector3(0.3f, 0.12f, 0.55f), new Vector3(0.06f, 0.1f, 0.16f), mEye);
-            d.jaw = BossKit.Pivot(d.head, "Mandibula", new Vector3(0f, -0.26f, 0.35f));
-            BossKit.Part(d.jaw, "Quijada", PrimitiveType.Cube, new Vector3(0f, 0f, 0.42f), new Vector3(0.55f, 0.14f, 0.85f), mBelly);
-            d.mouth = BossKit.Pivot(d.head, "Boca", new Vector3(0f, -0.15f, 1.2f));
-
-            // Alas
-            d.wingL = Wing(d.model, -1f, mBody, mWing);
-            d.wingR = Wing(d.model, 1f, mBody, mWing);
-
-            // Cola
-            Transform parent = BossKit.Pivot(d.model, "Cola", new Vector3(0f, 0f, -1.3f));
-            for (int i = 0; i < 6; i++)
-            {
-                var seg = BossKit.Pivot(parent, "Cola" + i, new Vector3(0f, -0.04f, i == 0 ? 0f : -0.55f));
-                BossKit.Part(seg, "Seg", PrimitiveType.Sphere, Vector3.zero, Vector3.one * (0.75f - i * 0.1f), mBody);
-                d.tail.Add(seg);
-                parent = seg;
-            }
-            BossKit.Part(parent, "Punta", PrimitiveType.Cube, new Vector3(0f, 0f, -0.35f), new Vector3(0.05f, 0.4f, 0.5f), mWing, new Vector3(0f, 0f, 0f));
-
-            // Patas
-            foreach (var p in new[] { new Vector3(-0.55f, -0.7f, 0.8f), new Vector3(0.55f, -0.7f, 0.8f), new Vector3(-0.6f, -0.7f, -0.7f), new Vector3(0.6f, -0.7f, -0.7f) })
-            {
-                BossKit.Part(d.model, "Pata", PrimitiveType.Cube, p, new Vector3(0.32f, 0.6f, 0.38f), mBody, new Vector3(20f, 0f, 0f));
-                BossKit.Part(d.model, "Garra", PrimitiveType.Cube, p + new Vector3(0f, -0.35f, 0.12f), new Vector3(0.36f, 0.12f, 0.45f), mHorn);
-            }
+            d.rig = DragonKit.Build(root.transform, spec, HoverHeight);
+            d.size = spec.size;
+            d.groundHeight = d.rig.legLength * spec.size;
+            foreach (var h in d.rig.heads) d.heads.Add(new HeadState { rig = h });
             return d;
-        }
-
-        static Transform Wing(Transform model, float side, Material bone, Material membrane)
-        {
-            var w = BossKit.Pivot(model, side < 0 ? "AlaI" : "AlaD", new Vector3(0.7f * side, 0.45f, 0.3f));
-            BossKit.Part(w, "Hueso", PrimitiveType.Cube, new Vector3(1.4f * side, 0f, 0f), new Vector3(2.8f, 0.14f, 0.18f), bone);
-            BossKit.Part(w, "Membrana", PrimitiveType.Cube, new Vector3(1.45f * side, -0.03f, -0.85f), new Vector3(2.9f, 0.05f, 1.9f), membrane);
-            BossKit.Part(w, "Dedo1", PrimitiveType.Cube, new Vector3(2.2f * side, 0f, -0.9f), new Vector3(0.08f, 0.08f, 1.9f), bone, new Vector3(0f, 25f * side, 0f));
-            BossKit.Part(w, "Dedo2", PrimitiveType.Cube, new Vector3(1.2f * side, 0f, -0.95f), new Vector3(0.08f, 0.08f, 1.9f), bone, new Vector3(0f, 8f * side, 0f));
-            return w;
         }
 
         // ------------------------------------------------------------------ comportamiento
         void Start()
         {
-            boss = GetComponent<FinalBoss>(); ai = GetComponent<EnemyAI3D>(); hs = GetComponent<HealthSystem>();
+            boss = GetComponent<FinalBoss>(); ai = GetComponent<EnemyAI3D>(); hs = GetComponent<HealthSystem>(); col = GetComponent<CapsuleCollider>();
             var p = GameObject.FindWithTag("Player"); if (p != null) player = p.transform;
-            if (ai != null) { ai.meleeEnabled = false; ai.attackRange = 11f; ai.moveSpeed = 2.4f; }
+            if (ai != null) { ai.meleeEnabled = false; ai.attackRange = 11f; }
             groundMask = GameLayers.Exists(GameLayers.Environment) ? GameLayers.Mask(GameLayers.Environment) : Physics.DefaultRaycastLayers;
             obstacleMask = GameLayers.Exists(GameLayers.Obstacles) ? GameLayers.Mask(GameLayers.Obstacles) : 0;
             nextFire = Time.time + 2.5f;
             lastPos = transform.position;
+            flapPhase = Random.value * 6f;
+            hs.Damaged += (_, __) => flash = 1f;
+            hs.Died += _ => OnDied();
         }
 
         void Update()
         {
-            if (hs.IsDead) return;
+            if (hs.IsDead || rig == null) return;
+            UpdateFlash();
             Animate();
             if (boss == null || !boss.IsAwake || player == null) return;
+            if (!roared) { roared = true; MageAudio.PlayBossRoar(transform.position, roarPitch); }
+
+            foreach (var h in heads) UpdateHead(h);
+            if (busy) return;
 
             Vector3 to = player.position - transform.position; to.y = 0f;
             float dist = to.magnitude;
-            if (dist < keepAway) Retreat(-to.normalized);
 
-            if (shotsLeft > 0) { Volley(); return; }
-            if (chargeT >= 0f) { Charge(); return; }
-            if (dist >= minRange && dist <= maxRange && Time.time >= nextFire &&
-                BossKit.LineOfSight(mouth.position, player.position + Vector3.up)) { chargeT = 0f; StartGlow(); }
+            if (landsInPhase2 && !phase2 && hs.Normalized < 0.5f && !AnyHeadBusy()) { StartCoroutine(Land()); return; }
+            if (!flying && dist < 4.6f * size && Time.time >= nextSwipe && !AnyHeadBusy()) { StartCoroutine(TailSwipe()); return; }
+            if (flying && keepAway > 0f && dist < keepAway) Retreat(-to.normalized);
+
+            if (Time.time >= nextFire && !AnyHeadBusy() && dist >= minRange * (flying ? 1f : 0.4f) && dist <= maxRange)
+            {
+                bool together = headsTogetherLowHp && heads.Count > 1 && hs.Normalized < 0.35f;
+                if (together) { foreach (var h in heads) TryCharge(h); }
+                else TryCharge(heads[nextHead++ % heads.Count]);
+                nextFire = Time.time + cooldown * Random.Range(0.85f, 1.15f) * (together ? 1.2f : 1f);
+            }
         }
 
-        void Charge()
+        bool AnyHeadBusy() { foreach (var h in heads) if (h.Busy) return true; return false; }
+
+        void TryCharge(HeadState h)
         {
-            chargeT += Time.deltaTime;
-            FacePlayer(8f);
-            float k = Mathf.Clamp01(chargeT / 0.65f);
-            jaw.localRotation = Quaternion.Euler(35f * k, 0f, 0f);
-            if (mouthGlow != null) { mouthGlow.transform.position = mouth.position; mouthGlow.transform.localScale = Vector3.one * Mathf.Lerp(0.1f, 0.7f, k); }
-            if (chargeT >= 0.65f) { chargeT = -1f; shotsLeft = fireballsPerVolley; nextShot = Time.time; }
+            if (!BossKit.LineOfSight(h.rig.mouth.position, player.position + Vector3.up)) return;
+            h.chargeT = 0f;
+            var spec = h.rig.spec;
+            h.glow = RuntimeMaterials.Prim(PrimitiveType.Sphere, spec.ice ? "HieloEnBoca" : "FuegoEnBoca", null, h.rig.mouth.position, Vector3.one * 0.1f, RuntimeMaterials.Glow(spec.breathCore), false);
+            var l = h.glow.AddComponent<Light>(); l.type = LightType.Point; l.color = spec.breathGlow; l.range = 4.5f; l.intensity = 3f; l.shadows = LightShadows.None;
         }
 
-        void Volley()
+        void UpdateHead(HeadState h)
         {
-            FacePlayer(8f);
-            if (Time.time < nextShot) return;
-            int i = fireballsPerVolley - shotsLeft;
-            float angle = fireballsPerVolley == 1 ? 0f : Mathf.Lerp(-spreadDegrees, spreadDegrees, i / (float)(fireballsPerVolley - 1));
-            Vector3 from = mouth.position;
-            float t = Vector3.Distance(from, player.position) / fireballSpeed;
+            var spec = h.rig.spec;
+            if (h.chargeT >= 0f)
+            {
+                h.chargeT += Time.deltaTime;
+                FacePlayer(5f);
+                float k = Mathf.Clamp01(h.chargeT / 0.7f);
+                if (h.glow != null) { h.glow.transform.position = h.rig.mouth.position; h.glow.transform.localScale = Vector3.one * Mathf.Lerp(0.1f, 0.65f, k); }
+                if (h.chargeT >= 0.7f) { h.chargeT = -1f; h.shotsLeft = spec.ice ? shardsPerVolley : fireballsPerVolley; h.nextShot = Time.time; }
+                return;
+            }
+            if (h.shotsLeft <= 0 || Time.time < h.nextShot) return;
+
+            int total = spec.ice ? shardsPerVolley : fireballsPerVolley;
+            int i = total - h.shotsLeft;
+            float spread = spec.ice ? spreadDegrees * 1.8f : spreadDegrees;
+            float angle = total == 1 ? 0f : Mathf.Lerp(-spread, spread, i / (float)(total - 1));
+            Vector3 from = h.rig.mouth.position;
+            float speed = spec.ice ? iceSpeed : fireballSpeed;
+            float t = Vector3.Distance(from, player.position) / speed;
             Vector3 target = BossKit.Predict(player, t * 0.6f) + Vector3.up * 0.9f;
             Vector3 dir = Quaternion.AngleAxis(angle, Vector3.up) * (target - from).normalized;
-            BossKit.Fireball(from, dir, fireballSpeed, fireballDamage, fireCore, fireGlow);
-            HitFX.Spark(from, fireGlow, 0.6f);
-            shotsLeft--;
-            nextShot = Time.time + 0.14f;
-            if (shotsLeft <= 0)
-            {
-                nextFire = Time.time + cooldown * Random.Range(0.85f, 1.15f);
-                if (mouthGlow != null) Destroy(mouthGlow);
-            }
+            BossKit.Fireball(from, dir, speed, spec.ice ? iceDamage : fireballDamage, spec.breathCore, spec.breathGlow, spec.ice ? 0.42f : 0.7f);
+            HitFX.Spark(from, spec.breathGlow, 0.6f);
+            h.shotsLeft--;
+            h.nextShot = Time.time + (spec.ice ? 0.08f : 0.14f);
+            if (h.shotsLeft <= 0 && h.glow != null) Destroy(h.glow);
         }
 
-        void StartGlow()
+        IEnumerator Land()
         {
-            mouthGlow = RuntimeMaterials.Prim(PrimitiveType.Sphere, "FuegoEnBoca", null, mouth.position, Vector3.one * 0.1f, RuntimeMaterials.Glow(fireCore), false);
-            var l = mouthGlow.AddComponent<Light>(); l.type = LightType.Point; l.color = fireGlow; l.range = 4f; l.intensity = 3f;
+            busy = true; phase2 = true;
+            MageAudio.PlayBossRoar(transform.position, roarPitch * 0.9f);
+            UIManager.Instance?.ShowMessage($"¡{(boss != null ? boss.bossName : "El dragón")} aterriza!  Cuidado con su cola", 2.5f);
+            flying = false;
+            yield return new WaitForSeconds(1.2f);
+            CameraShake3D.Shake(0.35f, 0.6f);
+            Dust(transform.position, 46, 3.2f);
+            if (ai != null) ai.attackRange = 3.4f * size;
+            keepAway = 0f; cooldown *= 1.3f;
+            nextSwipe = Time.time + 1.5f;
+            busy = false;
         }
 
+        IEnumerator TailSwipe()
+        {
+            busy = true;
+            nextSwipe = Time.time + 4.5f;
+            // Amago: se agacha y gira un poco hacia el lado contrario
+            for (float t = 0f; t < 0.35f; t += Time.deltaTime) { swipeYaw = Mathf.Lerp(0f, -25f, t / 0.35f); yield return null; }
+            bool hit = false;
+            const float dur = 0.75f;
+            for (float t = 0f; t < dur; t += Time.deltaTime)
+            {
+                float k = t / dur;
+                swipeYaw = Mathf.Lerp(-25f, 360f, k * k * (3f - 2f * k));
+                if (!hit && k > 0.4f && player != null)
+                {
+                    hit = true;
+                    Vector3 d = player.position - transform.position; d.y = 0f;
+                    if (d.magnitude < 5.2f * size)
+                    {
+                        var phs = player.GetComponent<HealthSystem>();
+                        if (phs != null && phs.TakeDamage(tailDamage)) CameraShake3D.Shake(0.25f, 0.35f);
+                    }
+                    Dust(transform.position, 20, 2.2f);
+                }
+                yield return null;
+            }
+            swipeYaw = 0f;
+            busy = false;
+        }
+
+        void OnDied()
+        {
+            foreach (var h in heads) if (h.glow != null) Destroy(h.glow);
+            var c = heads.Count > 0 ? heads[0].rig.spec.breathGlow : new Color(1f, 0.5f, 0.1f);
+            if (rig != null && rig.model != null) HitFX.Explosion(rig.model.position, 2.4f * size, c);
+        }
+
+        // ------------------------------------------------------------------ animación
         void Animate()
         {
-            float t = Time.time;
-            model.localPosition = new Vector3(0f, HoverHeight + Mathf.Sin(t * 1.5f) * 0.25f, 0f);
-            float flap = Mathf.Sin(t * 4f) * 35f;
-            wingL.localRotation = Quaternion.Euler(0f, 0f, -10f - flap);
-            wingR.localRotation = Quaternion.Euler(0f, 0f, 10f + flap);
-            for (int i = 0; i < tail.Count; i++)
-                tail[i].localRotation = Quaternion.Euler(4f, Mathf.Sin(t * 2f - i * 0.6f) * 14f, 0f);
-            if (chargeT < 0f && shotsLeft <= 0) jaw.localRotation = Quaternion.Slerp(jaw.localRotation, Quaternion.identity, Time.deltaTime * 6f);
-
-            // Inclinación al moverse
-            float dt = Mathf.Max(Time.deltaTime, 0.0001f);
+            float t = Time.time, dt = Mathf.Max(Time.deltaTime, 0.0001f);
             Vector3 v = (transform.position - lastPos) / dt; lastPos = transform.position;
+            v.y = 0f;
+            float speed = v.magnitude;
             float fwd = Vector3.Dot(v, transform.forward);
-            model.localRotation = Quaternion.Slerp(model.localRotation, Quaternion.Euler(Mathf.Clamp(fwd * 4f, -12f, 12f), 0f, 0f), dt * 4f);
 
-            if (player != null && boss != null && boss.IsAwake)
+            // Altura: vuelo con aleteo o de pie sobre las patas
+            float flapSpeed = flying ? 4.2f : 0f;
+            flapPhase += dt * flapSpeed;
+            float stroke = Mathf.Sin(flapPhase + 0.35f * Mathf.Sin(flapPhase));     // bajada más rápida que la subida
+            float targetY = flying ? HoverHeight + Mathf.Sin(t * 1.4f) * 0.2f - stroke * 0.12f : groundHeight + Mathf.Sin(t * 1.8f) * 0.02f;
+            var mp = rig.model.localPosition;
+            mp.y = Mathf.Lerp(mp.y, targetY, dt * (flying ? 4f : 2.2f));
+            rig.model.localPosition = mp;
+            if (col != null) col.center = new Vector3(0f, mp.y, 0f);
+
+            float lean = Mathf.Clamp(fwd * 4f, -12f, 12f);
+            rig.model.localRotation = Quaternion.Slerp(rig.model.localRotation, Quaternion.Euler(flying ? lean : lean * 0.4f, swipeYaw, 0f), swipeYaw != 0f ? 1f : dt * 4f);
+
+            // Respiración
+            float breath = Mathf.Sin(t * 1.6f);
+            rig.torso.localScale = new Vector3(1f + breath * 0.015f, 1f + breath * 0.025f, 1f);
+
+            // Alas
+            Quaternion wl, wr;
+            if (flying)
             {
-                Vector3 look = player.position + Vector3.up - head.position;
-                if (look.sqrMagnitude > 0.01f) head.rotation = Quaternion.Slerp(head.rotation, Quaternion.LookRotation(look), dt * 5f);
+                float raise = 12f + 40f * stroke;
+                float sweep = -6f * stroke;
+                wl = Quaternion.Euler(0f, -sweep, -raise);
+                wr = Quaternion.Euler(0f, sweep, raise);
             }
+            else
+            {
+                float idle = Mathf.Sin(t * 1.2f) * 3f;
+                wl = Quaternion.Euler(0f, -38f, 52f + idle);    // plegadas hacia abajo, la muñeca toca el suelo
+                wr = Quaternion.Euler(0f, 38f, -52f - idle);
+            }
+            rig.wingL.localRotation = Quaternion.Slerp(rig.wingL.localRotation, wl, dt * (flying ? 14f : 4f));
+            rig.wingR.localRotation = Quaternion.Slerp(rig.wingR.localRotation, wr, dt * (flying ? 14f : 4f));
+
+            // Cuellos y cabezas
+            bool awake = boss != null && boss.IsAwake && player != null;
+            for (int j = 0; j < heads.Count; j++)
+            {
+                var h = heads[j];
+                for (int i = 0; i < h.rig.neck.Count; i++)
+                {
+                    float yaw = Mathf.Sin(t * 1.1f + j * 1.7f + i * 0.5f) * 5f;
+                    float pitch = Mathf.Sin(t * 1.3f + j + i * 0.4f) * 3f;
+                    h.rig.neck[i].localRotation = Quaternion.Slerp(h.rig.neck[i].localRotation, Quaternion.Euler(pitch, yaw, 0f), dt * 3f);
+                }
+                if (awake)
+                {
+                    Vector3 look = player.position + Vector3.up - h.rig.head.position;
+                    if (look.sqrMagnitude > 0.01f) h.rig.head.rotation = Quaternion.Slerp(h.rig.head.rotation, Quaternion.LookRotation(look), dt * (h.Busy ? 8f : 4f));
+                }
+                else h.rig.head.localRotation = Quaternion.Slerp(h.rig.head.localRotation, Quaternion.Euler(18f + Mathf.Sin(t * 0.7f + j) * 6f, Mathf.Sin(t * 0.5f + j * 2f) * 15f, 0f), dt * 2f);
+
+                float open = h.chargeT >= 0f ? Mathf.Clamp01(h.chargeT / 0.7f) * 38f : h.shotsLeft > 0 ? 38f : 3f + Mathf.Sin(t * 1.6f + j) * 3f;
+                h.rig.jaw.localRotation = Quaternion.Slerp(h.rig.jaw.localRotation, Quaternion.Euler(open, 0f, 0f), dt * 10f);
+            }
+
+            // Cola
+            for (int i = 0; i < rig.tail.Count; i++)
+            {
+                float amp = flying ? 9f : 13f;
+                rig.tail[i].localRotation = Quaternion.Euler(3f + Mathf.Sin(t * 1.7f - i * 0.5f) * 3f, Mathf.Sin(t * 1.9f - i * 0.6f) * amp, 0f);
+            }
+
+            // Patas: colgando en vuelo, pasos en tierra
+            stepPhase += dt * speed * 2.4f / Mathf.Max(0.5f, size);
+            float walk = Mathf.Clamp01(speed / 1.5f);
+            for (int k = 0; k < rig.legs.Count; k++)
+            {
+                float x = flying ? 28f + Mathf.Sin(t * 1.4f + k) * 6f : Mathf.Sin(stepPhase + k * Mathf.PI + (k >= 2 ? Mathf.PI * 0.5f : 0f)) * 24f * walk;
+                rig.legs[k].localRotation = Quaternion.Slerp(rig.legs[k].localRotation, Quaternion.Euler(x, 0f, 0f), dt * 6f);
+            }
+        }
+
+        void UpdateFlash()
+        {
+            if (flash <= 0f) return;
+            flash = Mathf.MoveTowards(flash, 0f, Time.deltaTime * 5f);
+            foreach (var m in rig.materials) if (m != null) m.SetFloat("_Flash", flash * 0.6f);
+        }
+
+        void Dust(Vector3 at, int count, float speed)
+        {
+            CineGlow.Burst(at + Vector3.up * 0.3f, new Color(0.75f, 0.6f, 0.42f) * 0.7f, count, speed, 0.35f * size, 1.2f, 0.25f);
         }
 
         void Retreat(Vector3 dir)
@@ -196,6 +298,10 @@ namespace MageHero
             if (to.sqrMagnitude > 0.01f) transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(to), Time.deltaTime * speed);
         }
 
-        void OnDestroy() { if (mouthGlow != null) Destroy(mouthGlow); }
+        void OnDestroy()
+        {
+            foreach (var h in heads) if (h.glow != null) Destroy(h.glow);
+            if (rig != null) foreach (var m in rig.materials) if (m != null) Destroy(m);
+        }
     }
 }

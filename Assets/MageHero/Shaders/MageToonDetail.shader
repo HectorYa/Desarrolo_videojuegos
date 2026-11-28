@@ -6,10 +6,13 @@ Shader "MageHero/ToonDetail"
     //                      venas de lava que se abren con el daño (_Damage) y laten (_VeinGlow).
     //  Madera (_Mode = 1): vetas a lo largo de la fibra (dirección en UV1, la pone LowPoly.Grain), nudos,
     //                      cantos desgastados y madera mojada/musgosa por debajo de _WetLevel.
-    //  Ambos: brillo de borde a contraluz y destello blanco al recibir un golpe (_Flash).
+    //  Escamas (_Mode = 2): escamas celulares (Voronoi) con borde oscuro y moteado; donde el alfa del vértice
+    //                      es < 0.75, membrana de ala con venas, manchas y luz que la atraviesa a contraluz.
+    //                      Con _Damage > 0, grietas de lava que laten (cabeza de fuego).
+    //  Todos: brillo de borde a contraluz y destello blanco al recibir un golpe (_Flash).
     Properties
     {
-        [Enum(Piedra,0,Madera,1)] _Mode("Material", Float) = 0
+        [Enum(Piedra,0,Madera,1,Escamas,2)] _Mode("Material", Float) = 0
         _BaseColor("Color base", Color) = (1,1,1,1)
         _Threshold("Umbral de sombra", Range(0,1)) = 0.35
         _DetailScale("Escala del detalle", Float) = 3
@@ -69,6 +72,34 @@ Shader "MageHero/ToonDetail"
                             lerp(lerp(Hash3(i + float3(0,0,1)), Hash3(i + float3(1,0,1)), f.x), lerp(Hash3(i + float3(0,1,1)), Hash3(i + 1), f.x), f.y), f.z);
             }
             float Fbm3(float3 p) { return Noise3(p) * 0.5 + Noise3(p * 2.03 + 5.1) * 0.3 + Noise3(p * 4.07 + 9.7) * 0.2; }
+            // Distancia a la celda más cercana y a la segunda (Voronoi 3D): el borde entre escamas es d2 - d1.
+            float2 Worley3(float3 x)
+            {
+                float3 i = floor(x), f = frac(x);
+                float d1 = 8.0, d2 = 8.0;
+                [unroll] for (int z = -1; z <= 1; z++)
+                [unroll] for (int y = -1; y <= 1; y++)
+                [unroll] for (int k = -1; k <= 1; k++)
+                {
+                    float3 o = float3(k, y, z);
+                    float3 h = float3(Hash3(i + o), Hash3(i + o + 17.31), Hash3(i + o + 41.7));
+                    float3 r = o + h * 0.85 - f;
+                    float d = dot(r, r);
+                    if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+                }
+                return sqrt(float2(d1, d2));
+            }
+            // Venas de lava que se abren con _Damage (piedra del gólem y cabeza de fuego del dragón).
+            void LavaVeins(float3 pOS, float s, inout half3 baseC, inout half3 emit)
+            {
+                float vn = Noise3(pOS * s * 0.45 + 31.0);
+                float zone = saturate((Fbm3(pOS * s * 0.3 + 71.0) - (0.62 - _Damage * 0.42)) * 6.0) * step(0.02, _Damage);
+                float width = 0.015 + 0.03 * _Damage;
+                float vein = smoothstep(width, width * 0.3, abs(vn - 0.5)) * zone;
+                float pulse = 0.8 + 0.2 * sin(_Time.y * 4.0 + vn * 12.0);
+                baseC = lerp(baseC, baseC * 0.4, smoothstep(width * 2.4, width, abs(vn - 0.5)) * zone); // bordes chamuscados
+                emit += _VeinColor.rgb * vein * _VeinGlow * pulse;
+            }
 
             V vert(A i)
             {
@@ -88,6 +119,7 @@ Shader "MageHero/ToonDetail"
             {
                 float3 n = normalize(i.nWS);
                 half3 baseC = _BaseColor.rgb * i.col.rgb;
+                float memb = (_Mode > 1.5) ? step(i.col.a, 0.75) : 0.0;   // membrana del ala (alfa del vértice)
                 half3 emit = 0;
                 float s = _DetailScale;
 
@@ -113,15 +145,9 @@ Shader "MageHero/ToonDetail"
                     baseC = lerp(baseC, _MossColor.rgb * (0.85 + mossN * 0.3), moss);
                     // venas de lava: líneas finas del ruido que se abren a medida que sube el daño
                     // (solo aparecen por zonas: la máscara cubre más superficie cuanto mayor es el daño)
-                    float vn = Noise3(i.pOS * s * 0.45 + 31.0);
-                    float zone = saturate((Fbm3(i.pOS * s * 0.3 + 71.0) - (0.62 - _Damage * 0.42)) * 6.0) * step(0.02, _Damage);
-                    float width = 0.015 + 0.03 * _Damage;
-                    float vein = smoothstep(width, width * 0.3, abs(vn - 0.5)) * zone;
-                    float pulse = 0.8 + 0.2 * sin(_Time.y * 4.0 + vn * 12.0);
-                    baseC = lerp(baseC, baseC * 0.4, smoothstep(width * 2.4, width, abs(vn - 0.5)) * zone); // bordes chamuscados
-                    emit += _VeinColor.rgb * vein * _VeinGlow * pulse;
+                    LavaVeins(i.pOS, s, baseC, emit);
                 }
-                else
+                else if (_Mode < 1.5)
                 {
                     // ---------------- MADERA
                     float3 g = i.gOS;
@@ -148,6 +174,29 @@ Shader "MageHero/ToonDetail"
                     float moss = smoothstep(0.55, 0.8, Fbm3(i.pWS * 1.8) + wet * 0.35 + saturate(n.y) * 0.15) * _MossAmount * (0.35 + wet);
                     baseC = lerp(baseC, _MossColor.rgb, moss);
                 }
+                else
+                {
+                    // ---------------- ESCAMAS (y membrana de las alas)
+                    float3 p = i.pOS * s;
+                    float big = Fbm3(p * 0.35 + 11.0);
+                    if (memb < 0.5)
+                    {
+                        float2 w = Worley3(p * float3(1.0, 1.3, 0.8));
+                        float edge = w.y - w.x;
+                        half scale = lerp(0.66, 1.05, smoothstep(0.02, 0.24, edge))     // surco oscuro entre escamas
+                                   + smoothstep(0.4, 0.0, w.x) * 0.07                    // lomo de cada escama, más claro
+                                   + (big - 0.5) * 0.28;                                 // manchas grandes
+                        baseC *= lerp(1.0, scale, _DetailStrength);
+                        LavaVeins(i.pOS, s, baseC, emit);
+                    }
+                    else
+                    {
+                        float vein = smoothstep(0.05, 0.0, abs(Noise3(p * 0.8 + 5.0) - 0.5));
+                        float spots = smoothstep(0.66, 0.78, Noise3(p * 2.1 + 9.0));
+                        half m = 1.0 - vein * 0.28 - spots * 0.32 + (big - 0.5) * 0.22;
+                        baseC *= lerp(1.0, m, _DetailStrength);
+                    }
+                }
 
                 Light l = GetMainLight(TransformWorldToShadowCoord(i.pWS));
                 half ndl = saturate(dot(n, l.direction)) * l.shadowAttenuation;
@@ -159,6 +208,9 @@ Shader "MageHero/ToonDetail"
                 float3 v = normalize(GetWorldSpaceViewDir(i.pWS));
                 float rim = smoothstep(0.62, 0.78, 1.0 - saturate(dot(v, n)));
                 c += _RimColor.rgb * rim * _RimAmount * (0.35 + 0.65 * band);
+
+                // la membrana deja pasar la luz: por la cara contraria al sol se ve iluminada y cálida
+                c += baseC * l.color * saturate(dot(-n, l.direction)) * 0.6 * memb;
 
                 c += emit;
                 c = lerp(c, half3(1.6, 1.5, 1.4), _Flash);

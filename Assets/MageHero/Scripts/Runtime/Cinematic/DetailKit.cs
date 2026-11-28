@@ -35,6 +35,23 @@ namespace MageHero
         /// Piedra compartida para escombros y esquirlas (no destella).
         public static Material SharedStone() => sharedStone != null ? sharedStone : (sharedStone = Stone(3f, 0.15f));
 
+        /// Escamas de dragón (alfa del vértice < 0.75 = membrana de ala). lava > 0 abre grietas brillantes.
+        public static Material Scales(float detailScale = 2.4f, float lava = 0f, Color? lavaColor = null)
+        {
+            var m = new Material(Template()) { name = "escamas_detalle" };
+            m.SetFloat("_Mode", 2f);
+            m.SetFloat("_DetailScale", detailScale);
+            m.SetFloat("_DetailStrength", 0.75f);
+            m.SetFloat("_MossAmount", 0f);
+            m.SetFloat("_Damage", lava);
+            m.SetFloat("_VeinGlow", 1.2f);
+            if (lavaColor.HasValue) m.SetColor("_VeinColor", lavaColor.Value);
+            m.SetFloat("_RimAmount", 0.3f);
+            m.SetColor("_RimColor", new Color(1f, 0.92f, 0.8f));
+            m.SetFloat("_Flash", 0f);
+            return m;
+        }
+
         /// Madera con fibra, nudos y la parte cercana al agua mojada y con musgo.
         public static Material Wood(float wetLevel, float moss = 0.4f)
         {
