@@ -8,8 +8,8 @@ using UnityEngine.UI;
 namespace MageHero
 {
     /// Tutorial que sigue a la cinemática de apertura. El Gólem de Piedra se queda quieto en el prado (lugar abierto,
-    /// sin árboles) y el Maestro Athan —el orbe de luz— enseña, con su voz, cada control del juego:
-    /// moverse, correr, saltar, girar y acercar la cámara, abrir el mapa, el menú de pausa y lanzar hechizos.
+    /// sin árboles) y el Maestro Athan —el orbe de luz— enseña, con su voz, los controles básicos:
+    /// moverse con W A S D, saltar, mover la cámara y hacer clic para lanzar hechizos (dañar enemigos).
     /// Cada paso espera a que el jugador lo haga de verdad (con barra de progreso). Tab omite el tutorial.
     /// Al terminar, el Gólem ruge, huye al bosque (GolemRetreat) y vuelven los enemigos del nivel.
     public class GolemTutorial : MonoBehaviour
@@ -62,10 +62,24 @@ namespace MageHero
             yield return Realtime(0.6f);
             yield return Narrator.SayAndWait("tut_00");
 
-            var steps = BuildSteps();
-            for (int i = 0; i < steps.Count && !skip; i++)
-                yield return RunStep(steps[i], i + 1, steps.Count);
+            steps = BuildSteps();
+            yield return Flow(0);
+        }
 
+        List<Step> steps;
+        int currentStep = -1;
+        float lastAlive;
+
+        /// Recorre los pasos desde <paramref name="from"/> y termina. El vigilante de Update lo relanza en el mismo
+        /// paso si la corrutina deja de avanzar (así el tutorial nunca se queda congelado en un paso).
+        IEnumerator Flow(int from)
+        {
+            for (int i = from; i < steps.Count && !skip; i++)
+            {
+                currentStep = i;
+                yield return RunStep(steps[i], i + 1, steps.Count);
+            }
+            currentStep = -1;
             yield return Finish();
         }
 
@@ -91,17 +105,7 @@ namespace MageHero
                 progress = () => { Vector3 d = player.position - last; d.y = 0; moved += d.magnitude; last = player.position; return moved / 5f; },
             });
 
-            // 2 · Correr: mantener Shift mientras se avanza
-            float ran = 0f;
-            list.Add(new Step
-            {
-                title = "Correr", voice = "tut_correr", keys = new[] { "Shift", "+", "W" },
-                body = "Mantén Shift mientras avanzas para correr.",
-                begin = () => ran = 0f,
-                progress = () => { if (pc != null && pc.NormalizedSpeed > 0.8f) ran += Time.unscaledDeltaTime; return pc == null ? 1f : ran / 1.2f; },
-            });
-
-            // 3 · Saltar
+            // 2 · Saltar
             int jumps = 0; bool wasJumping = false;
             list.Add(new Step
             {
@@ -118,62 +122,18 @@ namespace MageHero
 
             if (iso != null)
             {
-                // 4 · Girar la cámara
+                // 3 · Mover la cámara
                 float turned = 0f, yaw0 = 0f;
                 list.Add(new Step
                 {
-                    title = "Girar la cámara", voice = "tut_girar", keys = new[] { "Q", "E", "Clic der. + ratón" },
+                    title = "Mover la cámara", voice = "tut_girar", keys = new[] { "Q", "E", "Clic der. + ratón" },
                     body = "Gira la cámara con Q / E, o mantén el clic derecho y mueve el ratón.",
                     begin = () => { turned = 0f; yaw0 = iso.yaw; },
                     progress = () => { turned += Mathf.Abs(Mathf.DeltaAngle(yaw0, iso.yaw)); yaw0 = iso.yaw; return turned / 70f; },
                 });
-
-                // 5 · Acercar / alejar
-                float zoomed = 0f, dist0 = 0f;
-                list.Add(new Step
-                {
-                    title = "Acercar y alejar", voice = "tut_zoom", keys = new[] { "Rueda", "Z", "X" },
-                    body = "Acerca o aleja la vista con la rueda del ratón (o con Z / X).",
-                    begin = () => { zoomed = 0f; dist0 = iso.distance; },
-                    progress = () => { zoomed += Mathf.Abs(iso.distance - dist0); dist0 = iso.distance; return zoomed / 4f; },
-                });
             }
 
-            if (FindAnyObjectByType<MapOverlay>() != null)
-            {
-                // 6 · Abrir y cerrar el mapa
-                list.Add(new Step
-                {
-                    title = "El mapa", voice = "tut_mapa", keys = new[] { "M" },
-                    body = "Pulsa M para abrir el mapa del bosque.",
-                    progress = () => MapOverlay.IsOpen ? 1f : 0f,
-                });
-                list.Add(new Step
-                {
-                    title = "El mapa", voice = "tut_mapa_cerrar", keys = new[] { "M", "Esc" },
-                    body = "Aquí ves dónde estás, las zonas y el camino. Ciérralo con M o Esc.",
-                    progress = () => MapOverlay.IsOpen ? 0f : 1f,
-                });
-            }
-
-            if (PauseMenu.Instance != null)
-            {
-                // 7 · Menú de pausa y opciones
-                list.Add(new Step
-                {
-                    title = "Menú y opciones", voice = "tut_pausa", keys = new[] { "Esc" },
-                    body = "Pulsa Esc para abrir el menú de pausa: continuar, reiniciar, ver el mapa o cambiar de escenario.",
-                    progress = () => PauseMenu.IsOpen ? 1f : 0f,
-                });
-                list.Add(new Step
-                {
-                    title = "Menú y opciones", voice = "tut_pausa_cerrar", keys = new[] { "Esc", "Continuar" },
-                    body = "Pulsa Esc otra vez (o el botón Continuar) para volver al juego.",
-                    progress = () => PauseMenu.IsOpen ? 0f : 1f,
-                });
-            }
-
-            // 8 · Atacar al Gólem
+            // 4 · Atacar al Gólem
             list.Add(new Step
             {
                 title = "¡Ataca!", voice = "tut_atacar", keys = new[] { "Clic izq.", "Enter" },
@@ -192,6 +152,7 @@ namespace MageHero
             float p = 0f;
             while (!skip)
             {
+                lastAlive = Time.unscaledTime;
                 p = Mathf.Max(p, Mathf.Clamp01(s.progress()));
                 SetProgress(p);
                 if (p >= 1f) break;
@@ -207,7 +168,9 @@ namespace MageHero
             panel.color = Color.Lerp(LowPolyUI.Slate, LowPolyUI.Right, 0.55f);
             MageAudio.PlayUIClick();
             if (spirit != null) StartCoroutine(spirit.Nod(1, 1.2f));
+            lastAlive = Time.unscaledTime;
             yield return Realtime(0.9f);
+            lastAlive = Time.unscaledTime;
             done.text = "";
             panel.color = LowPolyUI.Slate;
         }
@@ -247,6 +210,16 @@ namespace MageHero
         {
             if (playerHealth != null) playerHealth.SetInvulnerable(0.5f);    // nada hace daño durante el tutorial
 
+            // Vigilante: si el paso actual deja de actualizarse (corrutina detenida), se reanuda ese mismo paso.
+            if (steps != null && !finished && currentStep >= 0 && Time.unscaledTime - lastAlive > 2.5f)
+            {
+                Debug.LogWarning($"[MageHero] Tutorial: el paso {currentStep + 1} dejó de avanzar; se reanuda.");
+                StopAllCoroutines();
+                lastAlive = Time.unscaledTime;
+                if (group != null) group.alpha = 1f;
+                StartCoroutine(Flow(currentStep));
+            }
+
             var kb = Keyboard.current;
             if (!skip && !finished && kb != null && kb.tabKey.wasPressedThisFrame && !PauseMenu.IsOpen) skip = true;
 
@@ -265,6 +238,10 @@ namespace MageHero
                 if (face.sqrMagnitude > 0.01f) spirit.transform.rotation = Quaternion.Slerp(spirit.transform.rotation, Quaternion.LookRotation(face), 1f - Mathf.Exp(-4f * Time.unscaledDeltaTime));
                 spirit.Look(lookAtGolem && golem != null ? golem.Head.position : player.position + Vector3.up * 1.5f);
             }
+
+            // Con una tarjeta de reto o una pista abierta, el tutorial se aparta para no taparla
+            var uim = UIManager.Instance;
+            if (canvas != null) canvas.enabled = !(uim != null && uim.IsModalOpen);
 
             if (captionGroup != null)
             {
@@ -294,6 +271,8 @@ namespace MageHero
             if (finished || golem == null) return;
             hits++;
             golem.Stagger(0.9f);
+            golem.Hit(0.9f);                                                   // esquirlas, destello y retroceso
+            golem.SetDamage(hits * 0.12f);                                     // las venas de lava se abren un poco
             golem.SetCracks(2.4f);
             CancelInvoke(nameof(CracksBack)); Invoke(nameof(CracksBack), 0.35f);
             CameraShake3D.Shake(0.12f, 0.2f);
@@ -317,7 +296,7 @@ namespace MageHero
             group = go.GetComponent<CanvasGroup>(); group.blocksRaycasts = false; group.interactable = false; group.alpha = 0f;
 
             panel = LowPolyUI.Panel("Panel", go.transform, 860, 190, LowPolyUI.Slate, 24, 3, 31);
-            MenuStyle.Place(panel.rectTransform, new Vector2(.5f, 0f), new Vector2(0, 150), new Vector2(860, 190));
+            MenuStyle.Place(panel.rectTransform, new Vector2(.5f, 0f), new Vector2(0, 250), new Vector2(860, 190));   // por encima de las cajas de vida y XP
 
             var chip = LowPolyUI.Panel("Chip", panel.transform, 250, 40, LowPolyUI.Amber, 20, 2, 32, true, 0.06f);
             MenuStyle.Place(chip.rectTransform, new Vector2(0f, 1f), new Vector2(150, -6), new Vector2(250, 40));
@@ -352,7 +331,7 @@ namespace MageHero
             // Lo que dice el Maestro Athan (voz en off), encima del panel
             var cg = new GameObject("Voz", typeof(RectTransform), typeof(CanvasGroup));
             cg.transform.SetParent(go.transform, false);
-            MenuStyle.Place((RectTransform)cg.transform, new Vector2(.5f, 0f), new Vector2(0, 290), new Vector2(1300, 70));
+            MenuStyle.Place((RectTransform)cg.transform, new Vector2(.5f, 0f), new Vector2(0, 390), new Vector2(1300, 70));
             captionGroup = cg.GetComponent<CanvasGroup>(); captionGroup.alpha = 0f;
             caption = LowPolyUI.Text(cg.transform, "Texto", "", 26, new Color(0.78f, 0.93f, 1f), false);
             caption.horizontalOverflow = HorizontalWrapMode.Wrap;

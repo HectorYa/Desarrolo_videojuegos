@@ -24,7 +24,7 @@ namespace MageHero
             var c = host.GetComponent<ChaseMusic>();
             if (c == null) c = host.AddComponent<ChaseMusic>();
             c.ambience = ambienceSource;
-            if (ambienceSource != null) c.ambienceBase = ambienceSource.volume;
+            c.ambienceBase = 0.35f;                 // volumen base del ambiente (se multiplica por el ajuste "Música")
         }
 
         void Awake()
@@ -57,15 +57,16 @@ namespace MageHero
             if (playerAlive && (bossFighting || EnemyAI3D.AnyChasing)) lastChaseTime = Time.time;
             bool chasing = Time.time - lastChaseTime < releaseDelay;
 
-            float target = chasing ? volume : 0f;
-            float rate = volume / Mathf.Max(0.05f, chasing ? fadeIn : fadeOut);
+            float mv = GameSettings.Music;
+            float target = chasing ? volume * mv : 0f;
+            float rate = Mathf.Max(0.01f, volume * mv) / Mathf.Max(0.05f, chasing ? fadeIn : fadeOut);
             music.volume = Mathf.MoveTowards(music.volume, target, rate * Time.unscaledDeltaTime);
 
             if (music.volume > 0.001f) { if (!music.isPlaying) music.Play(); }
             else if (music.isPlaying) music.Stop();   // la próxima persecución empieza desde el inicio
 
             if (ambience != null)
-                ambience.volume = ambienceBase * Mathf.Lerp(1f, ambienceDuck, volume > 0f ? music.volume / volume : 0f);
+                ambience.volume = ambienceBase * mv * Mathf.Lerp(1f, ambienceDuck, volume * mv > 0.001f ? music.volume / (volume * mv) : 0f);
         }
     }
 }

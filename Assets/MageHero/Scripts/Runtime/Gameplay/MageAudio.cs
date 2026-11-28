@@ -34,11 +34,29 @@ namespace MageHero
             source.loop = true;
             source.playOnAwake = false;
             source.spatialBlend = 0f;
-            source.volume = 0.35f;
+            source.volume = 0.35f * GameSettings.Music;
             source.Play();
+            if (levelInfo.levelId != "volcan") MusicChannel.Attach(source, 0.35f);   // sigue el ajuste "Música" en vivo
 
             // Volcán: música de persecución mientras el jefe o los enemigos van a por el jugador.
             if (levelInfo.levelId == "volcan") ChaseMusic.Attach(levelInfo.gameObject, source);
+        }
+
+        static int exclusiveDepth;
+
+        /// Cinemática con sonido exclusivo: pausa TODO el audio del juego (música, ambiente, pasos, enemigos…).
+        /// Solo suenan las fuentes con ignoreListenerPause (las de la propia cinemática y la interfaz).
+        /// Es una pausa, no bajar el volumen: al terminar todo continúa justo donde estaba.
+        public static void BeginExclusiveAudio()
+        {
+            exclusiveDepth++;
+            AudioListener.pause = true;
+        }
+
+        public static void EndExclusiveAudio()
+        {
+            exclusiveDepth = Mathf.Max(0, exclusiveDepth - 1);
+            if (exclusiveDepth == 0 && !PauseMenu.IsOpen) AudioListener.pause = false;
         }
 
         /// Derrumbe del puente (Costa Chatarra). Suena en 2D porque la cámara enfoca el puente durante la cinemática.
@@ -58,7 +76,8 @@ namespace MageHero
                 source.playOnAwake = false;
                 source.spatialBlend = 0f;
             }
-            source.PlayOneShot(clip, 1f);
+            source.ignoreListenerPause = true;      // la cinemática pausa el resto del audio: este sonido sí debe oírse
+            source.PlayOneShot(clip, 1f * GameSettings.Sfx);
         }
 
         static AudioClip enemyAlertClip, enemyDeathClip;
@@ -106,13 +125,13 @@ namespace MageHero
             if (Time.unscaledTime - lastHoverTime < 0.05f) return;
             lastHoverTime = Time.unscaledTime;
             if (uiHoverClip == null) uiHoverClip = Resources.Load<AudioClip>("Audio/UI/UI_Hover");
-            if (uiHoverClip != null) UISource().PlayOneShot(uiHoverClip, 0.35f);
+            if (uiHoverClip != null) UISource().PlayOneShot(uiHoverClip, 0.35f * GameSettings.Sfx);
         }
 
         public static void PlayUIClick()
         {
             if (uiClickClip == null) uiClickClip = Resources.Load<AudioClip>("Audio/UI/UI_Click");
-            if (uiClickClip != null) UISource().PlayOneShot(uiClickClip, 0.7f);
+            if (uiClickClip != null) UISource().PlayOneShot(uiClickClip, 0.7f * GameSettings.Sfx);
         }
 
         static AudioClip bossRoarClip;
@@ -131,7 +150,7 @@ namespace MageHero
             go.transform.position = position;
             var source = go.AddComponent<AudioSource>();
             source.clip = clip;
-            source.volume = volume;
+            source.volume = volume * GameSettings.Sfx;
             source.pitch = pitch;
             source.spatialBlend = 0f;
             source.playOnAwake = false;
@@ -155,7 +174,7 @@ namespace MageHero
                 source.playOnAwake = false;
                 source.spatialBlend = 0f;
             }
-            source.PlayOneShot(attackClip, 0.85f);
+            source.PlayOneShot(attackClip, 0.85f * GameSettings.Sfx);
         }
     }
 }

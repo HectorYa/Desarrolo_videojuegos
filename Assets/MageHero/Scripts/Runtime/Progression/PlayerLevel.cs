@@ -44,6 +44,15 @@ namespace MageHero
             else Changed?.Invoke();
         }
 
+        /// Partida guardada: vuelve al nivel y al progreso de victorias que tenía el mago (con la vida llena).
+        public void Restore(int level, int killProgress)
+        {
+            Level = LevelStats.Clamp(level);
+            KillProgress = Mathf.Max(0, killProgress);
+            ApplyStats(refill: true);
+            Changed?.Invoke();
+        }
+
         /// Sube un nivel (si no está en el máximo). Devuelve false si ya era nivel 5.
         public bool LevelUp(string reason)
         {

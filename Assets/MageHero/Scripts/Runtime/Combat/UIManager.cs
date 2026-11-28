@@ -69,9 +69,11 @@ namespace MageHero
         string clueName = "Pergamino";
 
         static readonly Color Navy = new Color(0.114f, 0.208f, 0.341f, 1f), Gold = new Color(1f, 0.718f, 0.012f, 1f);
-        static Color AnswerBg => LowPolyUI.Tile;
-        static Color WrongBg => LowPolyUI.Wrong;
-        static Color RightBg => LowPolyUI.Right;
+        static Color AnswerBg => GameGui.Blue;
+        /// Un color por respuesta, como los botones del diseño (sin verde ni rojo: se reservan para acierto y fallo).
+        public static Color AnswerColor(int i) { switch (i) { case 0: return GameGui.Yellow; case 1: return GameGui.Blue; case 2: return GameGui.Purple; default: return GameGui.Orange; } }
+        static Color WrongBg => GameGui.Red;
+        static Color RightBg => GameGui.Green;
 
         // Tiempo límite del problema
         Image quizTimerFill; Text quizTimerText;
@@ -283,7 +285,7 @@ namespace MageHero
             quizTimeLeft = quizTimeLimit;
             quizOnTimeout = data.onTimeout;
             if (quizTimerFill != null) { quizTimerFill.transform.parent.gameObject.SetActive(quizTimeLimit > 0f); quizTimerFill.fillAmount = 1f; quizTimerFill.color = LowPolyUI.Amber; }
-            if (quizTimerText != null) { quizTimerText.text = quizTimeLimit > 0f ? Mathf.CeilToInt(quizTimeLimit).ToString() : ""; quizTimerText.color = LowPolyUI.Cream; }
+            if (quizTimerText != null) { quizTimerText.text = quizTimeLimit > 0f ? Mathf.CeilToInt(quizTimeLimit).ToString() : ""; quizTimerText.color = GameGui.Ink; }
         }
 
         /// Cuenta atrás en tiempo real (funciona también con el juego en cámara lenta). Se detiene al responder o al leer la pista.
@@ -302,13 +304,13 @@ namespace MageHero
             if (quizTimerText != null)
             {
                 quizTimerText.text = Mathf.CeilToInt(Mathf.Max(0f, quizTimeLeft)).ToString();
-                quizTimerText.color = k > 0.35f ? LowPolyUI.Cream : new Color(1f, 0.55f, 0.5f);
+                quizTimerText.color = k > 0.35f ? GameGui.Ink : GameGui.Red;
             }
             if (quizTimeLeft > 0f) return;
 
             // ¡Tiempo! Se bloquean las opciones y se avisa a quien abrió el problema.
             quizLocked = true;
-            foreach (var b in answerButtons) if (b != null) { b.interactable = false; b.GetComponent<Image>().color = Color.Lerp(AnswerBg, Color.gray, 0.5f); }
+            for (int i = 0; i < answerButtons.Length; i++) { var b = answerButtons[i]; if (b == null) continue; b.interactable = false; b.GetComponent<Image>().color = Color.Lerp(AnswerColor(i), Color.gray, 0.5f); }
             if (quizTitle != null) quizTitle.text = "¡Se acabó el tiempo!";
             var cb = quizOnTimeout; quizOnTimeout = null;
             if (cb != null) cb();
@@ -329,7 +331,7 @@ namespace MageHero
             quizLocked = false;
             quizTitle.text = data.title;
             quizSubtitle.text = data.subtitle;
-            quizQuestion.text = data.question;
+            quizQuestion.text = UIText.SafeSymbols(data.question);
             for (int i = 0; i < answerButtons.Length; i++)
             {
                 var b = answerButtons[i];
@@ -338,9 +340,9 @@ namespace MageHero
                 b.gameObject.SetActive(has);
                 if (!has) continue;
                 b.interactable = true;
-                b.GetComponent<Image>().color = AnswerBg;
+                b.GetComponent<Image>().color = AnswerColor(i);
                 var label = b.transform.Find("Label");
-                (label != null ? label.GetComponent<Text>() : b.GetComponentInChildren<Text>()).text = data.options[i];
+                (label != null ? label.GetComponent<Text>() : b.GetComponentInChildren<Text>()).text = UIText.SafeSymbols(data.options[i]);
             }
             SetFeedback(feedback, Color.white);
             RefreshHintButton();
@@ -406,7 +408,7 @@ namespace MageHero
         {
             if (cluePanel == null) return;
             clueTitle.text = title;
-            clueBody.text = body;
+            clueBody.text = UIText.SafeSymbols(body);
             if (!IsModalOpen) SetPlayerLocked(true);
             cluePanel.SetActive(true);
             cluePanel.transform.SetAsLastSibling();
@@ -515,38 +517,41 @@ namespace MageHero
             quiz.transform.SetParent(canvas, false);
             Stretch((RectTransform)quiz.transform);
             var backdrop = quiz.GetComponent<Image>(); backdrop.color = LowPolyUI.Backdrop; backdrop.raycastTarget = true;   // transparencia: se ve el juego detrás
-            var card = LowPolyUI.Panel("Card", quiz.transform, 640, 420, LowPolyUI.Slate, 30, 3, 11);
-            card.rectTransform.anchoredPosition = new Vector2(0, 6);
+            // Tarjeta del reto con el estilo GameGui (Diseños/MenuPrincipal): panel claro, cinta azul,
+            // la operación en una caja hundida, barra de tiempo y 4 respuestas de colores con su número.
+            var card = GameGui.Panel(quiz.transform, "Card", new Vector2(660, 440));
+            card.rectTransform.anchoredPosition = new Vector2(0, 0);
             var qBox = card.rectTransform;
 
-            var chip = LowPolyUI.Panel("TitleChip", qBox, 400, 50, LowPolyUI.Amber, 25, 2, 12, true, 0.06f);
-            var chrt = chip.rectTransform; chrt.anchorMin = chrt.anchorMax = new Vector2(.5f, 1f); chrt.anchoredPosition = new Vector2(0, -4);
-            var qTitle = LowPolyUI.Text(chip.transform, "Title", "Reto", 22, LowPolyUI.Cream);
-            Stretch(qTitle.rectTransform);
+            var chip = GameGui.Ribbon(qBox, "Reto", new Vector2(440, 64), GameGui.Blue, 26);
+            var chrt = chip.rectTransform; chrt.anchorMin = chrt.anchorMax = new Vector2(.5f, 1f); chrt.anchoredPosition = new Vector2(0, 10);
+            var qTitle = chip.GetComponentInChildren<Text>();
 
-            var eqBg = LowPolyUI.Panel("EquationBox", qBox, 560, 120, LowPolyUI.SlateDeep, 18, 2, 13, false, 0.05f);
-            Top(eqBg.rectTransform, -50, new Vector2(560, 120));
-            var qQ = LowPolyUI.Text(eqBg.transform, "Question", "", 60, LowPolyUI.Cream);
+            var eqBg = GameGui.Img("EquationBox", qBox, GameGui.Inset(), Color.white);
+            Top(eqBg.rectTransform, -62, new Vector2(580, 118));
+            var qQ = GameGui.Fit(GameGui.Text(eqBg.transform, "Question", "", 44, Color.white), 22, 44);
             Stretch(qQ.rectTransform);
+            qQ.rectTransform.offsetMin = new Vector2(18, 10); qQ.rectTransform.offsetMax = new Vector2(-18, -10);
+            // tamaño mediano que se reduce solo si la operación es larga (nunca se sale de la caja ni corta el signo)
 
-            // barra de tiempo (se vacía; ámbar → rojo) y segundos restantes
-            var barBg = LowPolyUI.Panel("TimerBar", qBox, 500, 16, LowPolyUI.SlateDeep, 8, 0, 14, true, 0.03f);
-            Top(barBg.rectTransform, -186, new Vector2(500, 16));
-            var fill = LowPolyUI.Panel("Fill", barBg.transform, 496, 12, LowPolyUI.Amber, 6, 0, 15, true, 0.05f);
+            // barra de tiempo (se vacía; amarillo → rojo) y segundos restantes
+            var barBg = GameGui.Img("TimerBar", qBox, GameGui.Inset(), Color.white);
+            Top(barBg.rectTransform, -196, new Vector2(500, 20));
+            var fill = GameGui.Img("Fill", barBg.transform, GameGui.ButtonSprite(), LowPolyUI.Amber);
             fill.type = Image.Type.Filled; fill.fillMethod = Image.FillMethod.Horizontal; fill.fillOrigin = 0; fill.fillAmount = 1f;
-            var timerText = LowPolyUI.Text(qBox, "TimerText", "", 20, LowPolyUI.Cream);
-            Top(timerText.rectTransform, -180, new Vector2(60, 28));
-            timerText.rectTransform.anchoredPosition = new Vector2(285, -180);
+            MenuStyle.Stretch(fill.rectTransform, 3f);
+            var timerText = GameGui.Text(qBox, "TimerText", "", 20, GameGui.Ink, TextAnchor.MiddleCenter, false);
+            Top(timerText.rectTransform, -192, new Vector2(60, 28));
+            timerText.rectTransform.anchoredPosition = new Vector2(292, -192);
 
             var buttons = new Button[4];
             for (int i = 0; i < 4; i++)
             {
-                var b = LowPolyUI.TileButton("Answer_" + (i + 1), qBox, 272, 78, 20 + i, out _);
+                var size = new Vector2(288, 68);
+                var b = GameGui.Button(qBox, "Answer_" + (i + 1), "", AnswerColor(i), GameGui.Icon.Number1 + i, null, 30, size);
                 var rt = (RectTransform)b.transform;
                 rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(.5f, 1f);
-                rt.anchoredPosition = new Vector2(i % 2 == 0 ? -144 : 144, -222 - (i / 2) * 92);
-                var key = LowPolyUI.Text(b.transform, "Key", (i + 1).ToString(), 17, new Color(1f, 0.96f, 0.88f, 0.55f), false);
-                var krt = key.rectTransform; krt.anchorMin = krt.anchorMax = new Vector2(0f, .5f); krt.anchoredPosition = new Vector2(46, 0); krt.sizeDelta = new Vector2(30, 30);
+                rt.anchoredPosition = new Vector2(i % 2 == 0 ? -152 : 152, -236 - (i / 2) * 82);
                 buttons[i] = b;
             }
 

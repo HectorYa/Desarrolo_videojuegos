@@ -16,6 +16,11 @@ namespace MageHero
             }
         }
 
+        /// El signo menos tipográfico (−, U+2212) no siempre está en la fuente integrada: en el editor Windows lo
+        /// suple con Arial, pero en la versión web no hay fuentes del sistema y el signo desaparece ("12   5 = ?").
+        /// Para mostrar operaciones se usa el guion ASCII, que todas las fuentes tienen.
+        public static string SafeSymbols(string s) => string.IsNullOrEmpty(s) ? s : s.Replace('\u2212', '-');
+
         public static Text Make(Transform parent, string name, string text, int size, Color color, TextAnchor anchor = TextAnchor.MiddleCenter)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Text));
@@ -43,7 +48,7 @@ namespace MageHero
                 var irt = img.GetComponent<RectTransform>(); irt.anchorMin = Vector2.zero; irt.anchorMax = Vector2.one; irt.offsetMin = irt.offsetMax = Vector2.zero;
                 var im = img.GetComponent<Image>(); im.color = bg; im.raycastTarget = false;
             }
-            var t = Make(go.transform, "Text", text, fontSize, fg);
+            var t = Make(go.transform, "Text", SafeSymbols(text), fontSize, fg);
             var trt = t.GetComponent<RectTransform>(); trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one; trt.offsetMin = trt.offsetMax = Vector2.zero;
             return go.GetComponent<Canvas>();
         }

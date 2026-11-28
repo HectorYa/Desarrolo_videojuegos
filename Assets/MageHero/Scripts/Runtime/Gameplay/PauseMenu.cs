@@ -5,8 +5,8 @@ using UnityEngine.UI;
 
 namespace MageHero
 {
-    /// Menú de pausa de los niveles (Esc o botón "Pausa" del HUD). Antes Esc volvía directo al menú de inicio.
-    /// Opciones: Continuar · Reiniciar nivel · Ver mapa · Cambiar de escenario · Menú principal, y la X para cerrar.
+    /// Menú de pausa de los niveles (Esc o botón "Pausa" del HUD), con el estilo GameGui del menú principal.
+    /// Opciones: Continuar · Guardar partida · Configuración · Ver mapa · Reiniciar nivel · Cambiar de escenario · Menú principal.
     /// Mientras está abierto el juego se congela (Time.timeScale = 0) y el sonido se pausa.
     public class PauseMenu : MonoBehaviour
     {
@@ -15,7 +15,9 @@ namespace MageHero
 
         public string menuScene = "MainMenu";
         GameObject root;
-        Button mapButton;
+        Button mapButton, saveButton;
+        SettingsPanel settings;
+        float savedLabelUntil;
         float savedTimeScale = 1f;
 
         void Awake()
@@ -34,7 +36,8 @@ namespace MageHero
         void Update()
         {
             var kb = Keyboard.current;
-            if (kb == null || !kb.escapeKey.wasPressedThisFrame) return;
+            if (savedLabelUntil > 0f && Time.unscaledTime > savedLabelUntil) { savedLabelUntil = 0f; SetSaveLabel("GUARDAR PARTIDA"); }
+            if (kb == null || !kb.escapeKey.wasPressedThisFrame || SettingsPanel.BlocksEscape) return;
             if (IsOpen) { Resume(); return; }
             // Esc primero cierra lo que esté abierto (quiz, pista, mapa); el Game Over y la victoria no se pausan.
             if (UIManager.BlocksEscape || MapOverlay.BlocksEscape || GameOverScreen.IsOpen || BossVictoryScreen.IsOpen) return;
@@ -56,12 +59,23 @@ namespace MageHero
         public void Resume()
         {
             if (!IsOpen) return;
+            if (settings != null && settings.gameObject.activeSelf) settings.Hide();
             root.SetActive(false);
             Time.timeScale = savedTimeScale;
             AudioListener.pause = false;
         }
 
         void Restart() => Load(SceneManager.GetActiveScene().name);
+
+        void SaveNow()
+        {
+            bool ok = SaveGame.Save();
+            SetSaveLabel(ok ? "¡PARTIDA GUARDADA!" : "NO SE PUDO GUARDAR");
+            savedLabelUntil = Time.unscaledTime + 2f;
+        }
+
+        void SetSaveLabel(string text) { var l = saveButton != null ? GameGui.Label(saveButton) : null; if (l != null) l.text = text; }
+        void OpenSettings() => settings.Show();
         void ChangeLevel() { StyledMainMenu.OpenLevelsOnStart = true; Load(menuScene); }
         void MainMenu() => Load(menuScene);
 
@@ -98,26 +112,35 @@ namespace MageHero
             scaler.referenceResolution = new Vector2(1280, 720);
             scaler.matchWidthOrHeight = 0.5f;
 
-            var box = MenuStyle.Window(canvasGo.transform, "PausePanel", "Pausa", new Vector2(520, 560), MenuStyle.Orange, Resume, out root);
+            var dim = GameGui.Dim(canvasGo.transform, "PausePanel", 0.55f);
+            root = dim.gameObject;
+            var box = GameGui.Panel(dim.transform, "Caja", new Vector2(420, 590)).rectTransform;
+            MenuStyle.Place(box, new Vector2(.5f, .5f), new Vector2(0, -20), new Vector2(420, 590));
+            var rib = GameGui.Ribbon(box, "Pausa", new Vector2(360, 68));
+            MenuStyle.Place(rib.rectTransform, new Vector2(.5f, 1f), new Vector2(0, 10), new Vector2(360, 68));
+            var sub = GameGui.Text(box, "Sub", "El juego está detenido", 18, GameGui.InkSoft, TextAnchor.MiddleCenter, false);
+            MenuStyle.Place(sub.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -60), new Vector2(380, 26));
 
-            var sub = MenuStyle.Label(box, "El juego está detenido", 20, MenuStyle.Cream, new Color(0, 0, 0, .6f), false);
-            MenuStyle.Place(sub.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -80), new Vector2(460, 30));
+            float y = -104f; const float step = 61f;
+            Add(box, "CONTINUAR", GameGui.Green, GameGui.Icon.Play, Resume, ref y, step);
+            saveButton = Add(box, "GUARDAR PARTIDA", GameGui.Yellow, GameGui.Icon.Save, SaveNow, ref y, step);
+            Add(box, "CONFIGURACIÓN", GameGui.Purple, GameGui.Icon.Settings, OpenSettings, ref y, step);
+            mapButton = Add(box, "VER MAPA (M)", GameGui.Blue, GameGui.Icon.Map, ShowMap, ref y, step);
+            Add(box, "REINICIAR NIVEL", GameGui.Orange, GameGui.Icon.Restart, Restart, ref y, step);
+            Add(box, "CAMBIAR ESCENARIO", GameGui.Teal, GameGui.Icon.Levels, ChangeLevel, ref y, step);
+            Add(box, "MENÚ PRINCIPAL", GameGui.Red, GameGui.Icon.Home, MainMenu, ref y, step);
 
-            float y = -150f, step = 78f;
-            Add(box, "Continuar", MenuStyle.Green, 34, Resume, ref y, step, 76f);
-            Add(box, "Reiniciar nivel", MenuStyle.Blue, 28, Restart, ref y, step, 64f);
-            mapButton = Add(box, "Ver mapa (M)", MenuStyle.Gold, 28, ShowMap, ref y, step, 64f);
-            Add(box, "Cambiar de escenario", MenuStyle.Purple, 26, ChangeLevel, ref y, step, 64f);
-            Add(box, "Menú principal", MenuStyle.Red, 28, MainMenu, ref y, step, 64f);
+            var hint = GameGui.Text(box, "Hint", "Esc: continuar", 15, GameGui.InkSoft, TextAnchor.MiddleCenter, false);
+            MenuStyle.Place(hint.rectTransform, new Vector2(.5f, 0f), new Vector2(0, 26), new Vector2(380, 22));
 
-            var hint = UIText.Make(box, "Hint", "Esc o X: continuar", 16, new Color(1, 1, 1, .6f));
-            MenuStyle.Place(hint.rectTransform, new Vector2(.5f, 0f), new Vector2(0, 22), new Vector2(460, 24));
+            settings = SettingsPanel.Create(canvasGo.transform, false, null);
         }
 
-        static Button Add(RectTransform box, string text, Color color, int font, System.Action onClick, ref float y, float step, float height)
+        static Button Add(RectTransform box, string text, Color color, GameGui.Icon icon, System.Action onClick, ref float y, float step)
         {
-            var b = MenuStyle.GlossyButton(text, box, text, color, font, onClick);
-            MenuStyle.Place((RectTransform)b.transform, new Vector2(.5f, 1f), new Vector2(0, y), new Vector2(360, height));
+            var size = new Vector2(340, 52);
+            var b = GameGui.Button(box, text, text, color, icon, onClick, 22, size);
+            MenuStyle.Place((RectTransform)b.transform, new Vector2(.5f, 1f), new Vector2(0, y), size);
             y -= step;
             return b;
         }

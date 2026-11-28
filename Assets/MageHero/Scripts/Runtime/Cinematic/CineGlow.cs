@@ -133,8 +133,25 @@ namespace MageHero
         float target = 1f, current, speed = 2.5f;
         public float Pulse = 0.12f;
 
-        public void Init(TextMesh t, Material m) { tm = t; mat = m; current = 0f; CineGlow.SetIntensity(mat, 0f); }
-        public string Text { get => tm.text; set => tm.text = value; }
+        public void Init(TextMesh t, Material m)
+        {
+            tm = t; mat = m; current = 0f; CineGlow.SetIntensity(mat, 0f);
+            tm.text = UIText.SafeSymbols(tm.text);
+            Font.textureRebuilt += OnFontRebuilt;
+            Refresh();
+        }
+        public string Text { get => tm.text; set { tm.text = UIText.SafeSymbols(value); Refresh(); } }
+
+        /// La fuente dinámica rehace su textura al pedir caracteres nuevos; el material propio (aditivo) guardaba la
+        /// textura vieja y los caracteres nuevos —p. ej. los signos— salían en blanco. Se pide el texto y se reasigna.
+        void Refresh()
+        {
+            if (tm == null || tm.font == null) return;
+            tm.font.RequestCharactersInTexture(tm.text, tm.fontSize, tm.fontStyle);
+            if (mat != null) mat.SetTexture("_MainTex", tm.font.material.mainTexture);
+        }
+
+        void OnFontRebuilt(Font f) { if (tm != null && f == tm.font && mat != null) mat.SetTexture("_MainTex", f.material.mainTexture); }
         public void FadeTo(float k, float perSecond = 2.5f) { target = k; speed = perSecond; }
         public void Flash(float k = 3f) { current = k; }
 
@@ -145,6 +162,6 @@ namespace MageHero
             CineGlow.SetIntensity(mat, current * p);
         }
 
-        void OnDestroy() { if (mat != null) Destroy(mat); }
+        void OnDestroy() { Font.textureRebuilt -= OnFontRebuilt; if (mat != null) Destroy(mat); }
     }
 }

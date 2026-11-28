@@ -56,11 +56,13 @@ namespace MageHero
         readonly List<Piece> pieces = new List<Piece>();
         readonly List<GameObject> deckSegments = new List<GameObject>();
         Renderer deckRenderer;
+        BridgeDress dress;
 
         class Piece
         {
             public Transform t; public Vector3 pos; public Quaternion rot; public Vector3 brokenPos; public Quaternion brokenRot;
-            public Renderer r; public Material mat; public Renderer original;
+            public Renderer[] rs; public Material[] mats; public Renderer original;
+            public float hangAngle = 24f, hangDrop = 0.35f;
             // derrumbe con física sencilla
             public bool falls, inWater, lean, hang; public float delay, seed, hingeSign; public Vector3 vel, angVel, hinge, leanAxis;
         }
@@ -72,6 +74,10 @@ namespace MageHero
             if (collapseZone == null || repairZone == null || blocker == null || gapWater == null) BuildHelpers();
             blocker.enabled = false;
             gapWater.SetActive(false);
+            // El río real (shader ToonWater) ya se ve por el hueco: la antigua losa rectangular a la altura
+            // de la cubierta se oculta en las escenas que todavía la tengan.
+            var gapRenderer = gapWater.GetComponent<Renderer>();
+            if (gapRenderer != null) gapRenderer.enabled = false;
             CurrentEquation = ArithmeticEquation.Random();
         }
 
@@ -82,6 +88,7 @@ namespace MageHero
             var p = GameObject.FindWithTag("Player");
             if (p != null) { player = p.transform; playerHealth = p.GetComponentInParent<HealthSystem>(); }
             collapseZone.Entered += _ => { if (State == BridgeState.Intact) StartCoroutine(CollapseCinematic()); };
+            FlowDirection();                                                   // la corriente del agua corre bajo el puente
         }
 
         void Update()
@@ -162,6 +169,7 @@ namespace MageHero
             var cam = Camera.main;
             var follow = cam != null ? cam.GetComponent<IsoCameraFollow>() : null;
             ui?.BeginCinematic();
+            MageAudio.BeginExclusiveAudio();                                   // música, ambiente, pasos y enemigos en pausa
             if (follow != null) follow.enabled = false;
             BridgeAxes(out Vector3 axis, out Vector3 side, out float len);
             Vector3 c = transform.position;
@@ -181,7 +189,8 @@ namespace MageHero
             StartCoroutine(Scale(villain.transform, Vector3.zero, Vector3.one, 0.7f));
             StartCoroutine(CamMove(cam, villainPos - away * 7.5f + side * 3.2f + Vector3.up * 0.6f, villainPos, 3.2f, 38f));
             ui?.SetSubtitle("EL GRAN CERO:  ¡Ja, ja! Ningún mago cruzará mi río...  ¡Este puente ahora vale CERO!");
-            yield return new WaitForSeconds(3.0f);
+            float voice1 = VillainVoice.Say("grancero_01");                    // voz grave y grotesca
+            yield return new WaitForSeconds(Mathf.Max(3.0f, voice1 - 2.4f));    // carga el rayo mientras termina la frase
 
             // 3) carga: la energía roja converge en su mano y el anillo gira más rápido (contrapicado desde el puente)
             var spin = villain.GetComponentInChildren<SpinRing>();
@@ -203,17 +212,20 @@ namespace MageHero
             Time.timeScale = 0.35f;
             StartCoroutine(RestoreTime(0.9f));
             yield return SimulateCollapse(3.4f);
+            StartCoroutine(FloatDebris());
 
             // 5) el Gran Cero se burla mientras la cámara rodea el hueco del puente
             StartCoroutine(CamMove(cam, c + side * (len * 0.8f + 5f) + axis * 4f + Vector3.up * 4.5f, c + Vector3.down * 0.6f, 2.8f, 44f));
             ui?.SetSubtitle("EL GRAN CERO:  Si quieres pasar, resuelve mi ecuación...  ¡si es que puedes!");
-            yield return new WaitForSeconds(2.6f);
+            float voice2 = VillainVoice.Say("grancero_02");
+            yield return new WaitForSeconds(Mathf.Max(2.6f, voice2 + 0.3f));
             HitFX.Explosion(villainPos, 1.6f, new Color(0.6f, 0.15f, 0.6f));
             yield return Scale(villain.transform, Vector3.one, Vector3.zero, 0.45f);
             Destroy(villain);
 
             if (follow != null) follow.enabled = true;                                // la cámara de juego vuelve sola junto al mago
             ui?.EndCinematic();
+            MageAudio.EndExclusiveAudio();                                     // vuelve todo el sonido donde se quedó
             EnemyAI3D.CalmAround(transform.position, 25f, 4f);
 
             State = BridgeState.Broken;
@@ -290,9 +302,45 @@ namespace MageHero
         void BreakBridge()
         {
             pieces.Clear();
+            dress = deck != null ? deck.GetComponent<BridgeDress>() : null;
+            if (dress != null)
+            {
+                // Puente vestido (BridgeDresser): se rompen los tablones de verdad. Los del centro saltan y caen al
+                // río; cerca del borde del hueco unos quedan sueltos y colgando y otros caen (borde irregular);
+                // los largueros se parten por la mitad y cada mitad cuelga hacia el agua.
+                dress.animating = true;
+                dress.Rest();
+                BridgeAxes(out Vector3 ax, out _, out float dlen);
+                foreach (var pl in dress.planks)
+                {
+                    if (pl == null) continue;
+                    float f = Vector3.Dot(pl.position - transform.position, ax) / Mathf.Max(0.1f, dlen);
+                    float af = Mathf.Abs(f), sgn = f < 0f ? -1f : 1f;
+                    bool falls = af < 0.27f || (af < 0.36f && Random.value < 0.4f);
+                    bool loose = !falls && af < 0.36f;
+                    if (!falls && !loose) continue;                                          // sigue clavado
+                    var p = AddPiece(pl, pl.position, pl.rotation);
+                    p.hingeSign = sgn;
+                    if (falls)
+                    {
+                        p.falls = true;
+                        p.delay = af * 0.25f + Random.Range(0f, 0.15f);                     // primero el centro
+                        p.vel = ax * sgn * Random.Range(0.6f, 2.6f) + Vector3.up * Random.Range(2f, 4.8f) + Random.insideUnitSphere * 0.6f;
+                        p.angVel = new Vector3(Random.Range(-260f, 260f), Random.Range(-80f, 80f), Random.Range(-260f, 260f));
+                    }
+                    else { p.hang = true; p.hangAngle = Random.Range(8f, 38f); p.delay = Random.Range(0f, 0.2f); }
+                }
+                foreach (var st in dress.stringers)
+                {
+                    if (st == null) continue;
+                    var p = AddPiece(st, st.position, st.rotation);
+                    p.hang = true; p.hangAngle = Random.Range(26f, 36f); p.hangDrop = 0.06f; p.delay = Random.Range(0.05f, 0.2f);   // gira desde la orilla
+                    p.hingeSign = Vector3.Dot(st.position - transform.position, ax) < 0f ? -1f : 1f;
+                }
+            }
             // La cubierta se parte en 6 tablones: los de los extremos quedan colgando del borde, los centrales caen al río.
-            deckRenderer = deck != null ? deck.GetComponent<Renderer>() : null;
-            if (deck != null)
+            deckRenderer = dress == null && deck != null ? deck.GetComponent<Renderer>() : null;
+            if (deck != null && dress == null)
             {
                 bool alongZ = deck.lossyScale.z >= deck.lossyScale.x;
                 float len = alongZ ? deck.lossyScale.z : deck.lossyScale.x, wid = alongZ ? deck.lossyScale.x : deck.lossyScale.z;
@@ -345,6 +393,7 @@ namespace MageHero
             Splinters(transform.position + Vector3.up * 0.4f, 34);
             blocker.enabled = true;
             gapWater.SetActive(true);
+            StartCoroutine(OpenRiverBed(0.5f));
             PushPlayerOffBlocker();
             PushEnemiesOffBridge();
         }
@@ -354,6 +403,8 @@ namespace MageHero
         IEnumerator SimulateCollapse(float seconds)
         {
             float waterY = WaterLevel();
+            Vector3 flow = FlowDirection();
+            AimIntoRiver(waterY);
             // crujido previo: todo el puente vibra un instante
             var basePos = new Dictionary<Piece, Vector3>();
             foreach (var p in pieces) basePos[p] = p.t.position;
@@ -389,7 +440,8 @@ namespace MageHero
                         }
                         else
                         {
-                            // flota: sube a la superficie, se aplana poco a poco y deriva con la corriente
+                            // flota: sube a la superficie, se aplana poco a poco y la corriente se lo lleva río abajo
+                            p.vel += flow * (0.55f * dt);
                             Vector3 pos = p.t.position;
                             pos += p.vel * dt;
                             pos.y = Mathf.Lerp(pos.y, waterY - 0.08f + Mathf.Sin(time * 2.2f + p.seed) * 0.05f, 1f - Mathf.Exp(-3f * dt));
@@ -401,8 +453,14 @@ namespace MageHero
                     }
                     else if (p.lean)
                     {
-                        // pilar que se inclina y se hunde
+                        // pilar que se inclina y se hunde (al empezar a caer rompe la superficie del agua)
                         float k = Mathf.Clamp01((time - p.delay) / 1.4f);
+                        if (!p.inWater && k > 0.35f)
+                        {
+                            p.inWater = true;
+                            Vector3 at = p.t.position + p.leanAxis * 0.6f; at.y = waterY + 0.05f;
+                            Splash(at, 0.7f);
+                        }
                         p.t.rotation = Quaternion.AngleAxis(Mathf.Lerp(0f, 55f, k * k), p.leanAxis) * p.rot;
                         p.t.position = p.pos + Vector3.down * (1.4f * k);
                     }
@@ -412,13 +470,354 @@ namespace MageHero
                         float k = Mathf.Clamp01((time - p.delay) / 0.5f);
                         float ease = 1f - Mathf.Pow(1f - k, 3f) + Mathf.Sin(k * Mathf.PI) * 0.15f;
                         BridgeAxes(out Vector3 ax, out _, out _);
-                        p.t.rotation = Quaternion.AngleAxis(-p.hingeSign * 24f * ease, Vector3.Cross(Vector3.up, ax)) * p.rot;
-                        p.t.position = p.pos + Vector3.down * 0.35f * ease - ax * p.hingeSign * 0.2f * ease;
+                        p.t.rotation = Quaternion.AngleAxis(-p.hingeSign * p.hangAngle * ease, Vector3.Cross(Vector3.up, ax)) * p.rot;
+                        p.t.position = p.pos + Vector3.down * p.hangDrop * ease - ax * p.hingeSign * p.hangDrop * 0.57f * ease;
                     }
                 }
                 yield return null;
             }
             foreach (var p in pieces) if (p.t != null) { p.brokenPos = p.t.position; p.brokenRot = p.t.rotation; }
+        }
+
+        /// Mientras el puente sigue roto, los tablones del río no se quedan congelados: la corriente los
+        /// arrastra unos metros (cada vez más despacio), cabecean con las olas, giran poco a poco y de vez
+        /// en cuando dejan una onda. La espuma a su alrededor la pinta el shader del agua.
+        IEnumerator FloatDebris()
+        {
+            float waterY = WaterLevel();
+            Vector3 flow = FlowDirection();
+            var floating = new List<Piece>();
+            var anchors = new List<Vector3>();
+            var reach = new List<float>();                                     // cuánto puede bajar cada uno sin varar
+            foreach (var p in pieces)
+                if (p.falls && p.inWater && p.t != null)
+                {
+                    Vector3 a = KeepInRiver(p.t.position, waterY);
+                    float r = 0f;
+                    while (r < 14f && !IsShallow(a + flow * (r + 0.5f), waterY)) r += 0.5f;
+                    floating.Add(p); anchors.Add(a); reach.Add(r);
+                }
+            if (floating.Count == 0) yield break;
+            // cada pieza llega a una distancia distinta: la corriente las separa en fila río abajo
+            var spread = new List<float>();
+            float gapStep = Mathf.Clamp(12f / floating.Count, 0.7f, 2.6f);         // con muchos tablones, más juntos
+            for (int i = 0; i < floating.Count; i++) spread.Add(1.2f + i * gapStep + Random.Range(-0.4f, 0.4f));
+            for (int i = spread.Count - 1; i > 0; i--) { int j = Random.Range(0, i + 1); (spread[i], spread[j]) = (spread[j], spread[i]); }
+
+            float time = 0f, nextRipple = 0.8f;
+            while (State == BridgeState.Collapsing || State == BridgeState.Broken)
+            {
+                float dt = Time.deltaTime; time += dt;
+                float travel = 1f - Mathf.Exp(-time / 9f);                       // se alejan y poco a poco se frenan
+                for (int i = 0; i < floating.Count; i++)
+                {
+                    var p = floating[i];
+                    if (p.t == null) continue;
+                    Vector3 side = Vector3.Cross(Vector3.up, flow);
+                    Vector3 target = anchors[i] + flow * Mathf.Min(reach[i], travel * spread[i])
+                                   + side * Mathf.Sin(time * 0.35f + p.seed) * 0.2f;
+                    target.y = waterY - 0.08f + Mathf.Sin(time * 2.2f + p.seed) * 0.05f;
+                    p.t.position = Vector3.Lerp(p.t.position, target, 1f - Mathf.Exp(-1.2f * dt));
+                    Quaternion bob = Quaternion.Euler(Mathf.Sin(time * 1.3f + p.seed) * 5f, 0f, Mathf.Cos(time * 1.1f + p.seed) * 5f);
+                    Quaternion yaw = Quaternion.AngleAxis((p.seed % 2f - 1f) * 9f * dt, Vector3.up);
+                    Vector3 fwd = Vector3.ProjectOnPlane(yaw * p.t.forward, Vector3.up);
+                    if (fwd.sqrMagnitude < 1e-4f) fwd = flow;
+                    p.t.rotation = Quaternion.Slerp(p.t.rotation, Quaternion.LookRotation(fwd.normalized, Vector3.up) * bob, 1f - Mathf.Exp(-2f * dt));
+                }
+                if (time >= nextRipple)
+                {
+                    var p = floating[Random.Range(0, floating.Count)];
+                    if (p.t != null) WaterRipples.Add(new Vector3(p.t.position.x, waterY, p.t.position.z), Random.Range(0.35f, 0.6f), 0.45f);
+                    nextRipple = time + Random.Range(0.9f, 2.2f);
+                }
+                yield return null;
+            }
+        }
+
+        /// Dirección en la que corre el río bajo el puente (perpendicular al puente). La primera vez también
+        /// orienta las líneas de corriente del shader del agua (Water_Visual) en esa dirección, para que los
+        /// tablones floten hacia donde se ve correr el agua.
+        Vector3 FlowDirection()
+        {
+            if (flowDir.HasValue) return flowDir.Value;
+            BridgeAxes(out _, out Vector3 side, out _);
+            var wv = GameObject.Find("Water_Visual");
+            var r = wv != null ? wv.GetComponent<Renderer>() : null;
+            if (r != null && r.sharedMaterial != null && r.sharedMaterial.HasProperty("_FlowDir"))
+            {
+                Vector4 f = r.sharedMaterial.GetVector("_FlowDir");
+                if (f.x * side.x + f.z * side.z < 0f) side = -side;
+                var block = new MaterialPropertyBlock();
+                r.GetPropertyBlock(block);
+                block.SetVector("_FlowDir", new Vector4(side.x, 0f, side.z, 0f));
+                r.SetPropertyBlock(block);
+            }
+            flowDir = side;
+            return side;
+        }
+        Vector3? flowDir;
+
+        // ---- dónde hay agua de verdad bajo el puente (para que nada caiga ni flote sobre la orilla)
+        bool spanReady; float spanMin, spanMax;
+
+        /// ¿El fondo en ese punto está por encima (o casi) de la superficie? Toma el impacto más bajo del rayo
+        /// (el lecho o el suelo), ignorando el agua y los triggers. Bajo la huella del puente el collider del
+        /// terreno es plano (para caminar), así que ahí se mira el cauce justo antes y después del puente.
+        bool IsShallow(Vector3 p, float waterY)
+        {
+            BridgeAxes(out _, out Vector3 side, out _);
+            float off = Vector3.Dot(p - transform.position, side), half = ShortHalf() + 1.2f;
+            if (Mathf.Abs(off) < half)
+            {
+                Vector3 q = p - side * off;
+                return GroundShallow(q + side * half, waterY) || GroundShallow(q - side * half, waterY);
+            }
+            return GroundShallow(p, waterY);
+        }
+
+        float ShortHalf() => deck == null ? 4.5f : Mathf.Min(deck.lossyScale.x, deck.lossyScale.z) * 0.5f;
+
+        bool GroundShallow(Vector3 p, float waterY)
+        {
+            int skip = GameLayers.Exists(GameLayers.Water) ? GameLayers.Mask(GameLayers.Water) : 0;
+            float low = float.MaxValue;
+            foreach (var h in Physics.RaycastAll(new Vector3(p.x, waterY + 40f, p.z), Vector3.down, 80f, ~skip, QueryTriggerInteraction.Ignore))
+                low = Mathf.Min(low, h.point.y);
+            return low > waterY - 0.35f;
+        }
+
+        /// Tramo (a lo largo del eje del puente, relativo a su centro) bajo el que hay agua, con margen de orilla.
+        void RiverSpan(float waterY, out float min, out float max)
+        {
+            if (!spanReady)
+            {
+                BridgeAxes(out Vector3 axis, out _, out float len);
+                spanMin = float.MaxValue; spanMax = float.MinValue;
+                for (float a = -len; a <= len; a += 0.25f)
+                    if (!IsShallow(transform.position + axis * a, waterY)) { spanMin = Mathf.Min(spanMin, a); spanMax = Mathf.Max(spanMax, a); }
+                if (spanMin > spanMax) { spanMin = -len * 0.2f; spanMax = len * 0.2f; }
+                else
+                {
+                    spanMin += 0.9f; spanMax -= 0.9f;
+                    if (spanMin > spanMax) spanMin = spanMax = (spanMin + spanMax) * 0.5f;
+                }
+                spanReady = true;
+            }
+            min = spanMin; max = spanMax;
+        }
+
+        Vector3 KeepInRiver(Vector3 pos, float waterY)
+        {
+            RiverSpan(waterY, out float min, out float max);
+            BridgeAxes(out Vector3 axis, out _, out _);
+            float a = Vector3.Dot(pos - transform.position, axis);
+            return pos + axis * (Mathf.Clamp(a, min, max) - a);
+        }
+
+        // ---- el cauce bajo el puente
+        // El terreno generado pasa por debajo del puente como una franja de tierra plana (a la altura de la
+        // cubierta). Al romperse el puente esa franja se hunde hasta el lecho del río (solo la malla visible:
+        // el collider no cambia y el Blocker impide el paso), así el agua del río se ve continua bajo el hueco,
+        // con sus orillas y su espuma. Al reparar el puente se restaura la malla original.
+        MeshFilter bedFilter; Mesh bedOriginal, bedMesh; MeshRenderer bedHiddenRenderer; GameObject bedProxy;
+        readonly List<Renderer> hiddenDecor = new List<Renderer>();
+
+        IEnumerator OpenRiverBed(float seconds)
+        {
+            float waterY = WaterLevel();
+            var mc = TerrainUnderBridge();
+            var mf = mc != null ? mc.GetComponent<MeshFilter>() : null;
+            var mr = mc != null ? mc.GetComponent<MeshRenderer>() : null;
+            if (mf == null || mr == null || mf.sharedMesh == null || !mf.sharedMesh.isReadable) yield break;
+
+            BridgeAxes(out Vector3 axis, out Vector3 side, out float len);
+            float half = ShortHalf() + 0.6f, probe = ShortHalf() + 1.2f;
+            // hasta donde se puede abrir el cauce: deja libre el metro y medio de cada extremo (donde el mago
+            // queda al ser empujado fuera del Blocker), con 0.6 m de transición suave
+            float axialMax = LongHalf() - 1.0f;
+            Mesh src = mf.sharedMesh;
+            Mesh colMesh = mc.sharedMesh;
+            int[] colTris = colMesh != null && colMesh.isReadable ? colMesh.triangles : null;
+            Color32[] colCols = colMesh != null && colMesh.isReadable ? colMesh.colors32 : null;
+            var verts = src.vertices;
+            var cols = src.colors32;
+            bool hasCols = cols.Length == verts.Length;
+            var target = (Vector3[])verts.Clone();
+            var tr = mf.transform; Vector3 c = transform.position;
+            var changed = new List<int>();
+            float wetMin = float.MaxValue, wetMax = float.MinValue;
+
+            bool Probe(Vector3 p, out float h, out Color32 col)
+            {
+                h = 0f; col = new Color32(128, 128, 128, 255);
+                if (!mc.Raycast(new Ray(new Vector3(p.x, waterY + 50f, p.z), Vector3.down), out RaycastHit hit, 120f)) return false;
+                h = hit.point.y;
+                if (colTris != null && colCols != null && colCols.Length > 0)
+                {
+                    int ti = hit.triangleIndex * 3; Vector3 b = hit.barycentricCoordinate;
+                    Color c0 = colCols[colTris[ti]], c1 = colCols[colTris[ti + 1]], c2 = colCols[colTris[ti + 2]];
+                    col = c0 * b.x + c1 * b.y + c2 * b.z;
+                }
+                return true;
+            }
+
+            for (int i = 0; i < verts.Length; i++)
+            {
+                Vector3 w = tr.TransformPoint(verts[i]);
+                Vector3 d = w - c;
+                float s = Vector3.Dot(d, side), a = Vector3.Dot(d, axis);
+                if (Mathf.Abs(s) >= half || Mathf.Abs(a) > axialMax) continue;
+                Vector3 basePt = c + axis * a;
+                if (!Probe(basePt - side * probe, out float hA, out Color32 cA) || !Probe(basePt + side * probe, out float hB, out Color32 cB)) continue;
+                if (Mathf.Min(hA, hB) > waterY - 0.3f) continue;               // ningún lado tiene río: es orilla
+                // río a un lado y orilla al otro (el río hace curva bajo el puente): la orilla queda en diagonal
+                float k = Mathf.InverseLerp(-probe, probe, s);
+                float taper = Mathf.Clamp01((axialMax - Mathf.Abs(a)) / 0.6f);
+                float bed = Mathf.Lerp(w.y, Mathf.Lerp(hA, hB, k), taper);
+                if (bed >= w.y - 0.05f) continue;
+                w.y = bed;
+                target[i] = tr.InverseTransformPoint(w);
+                if (hasCols) cols[i] = Color32.Lerp(cols[i], Color32.Lerp(cA, cB, k), taper);
+                changed.Add(i);
+                if (bed < waterY) { wetMin = Mathf.Min(wetMin, a); wetMax = Mathf.Max(wetMax, a); }
+            }
+            if (changed.Count == 0) yield break;
+            if (wetMin <= wetMax) FitBlocker(wetMin, wetMax);                   // que no se pueda caminar sobre el agua
+
+            // copia de la malla (el collider sigue con la original)
+            bedOriginal = src;
+            bedMesh = Instantiate(src);
+            bedMesh.name = src.name + "_CauceAbierto";
+            bedMesh.MarkDynamic();
+            if (mr.isPartOfStaticBatch)
+            {
+                bedProxy = new GameObject(mf.name + "_Cauce", typeof(MeshFilter), typeof(MeshRenderer));
+                bedProxy.transform.SetPositionAndRotation(tr.position, tr.rotation);
+                bedProxy.transform.localScale = tr.lossyScale;
+                bedProxy.GetComponent<MeshFilter>().sharedMesh = bedMesh;
+                bedProxy.GetComponent<MeshRenderer>().sharedMaterials = mr.sharedMaterials;
+                bedHiddenRenderer = mr; mr.enabled = false;
+            }
+            else { bedFilter = mf; mf.sharedMesh = bedMesh; }
+            if (hasCols) bedMesh.SetColors(cols);
+
+            // normales nuevas solo alrededor de lo que se hundió (el resto del terreno queda idéntico)
+            var origNormals = src.normals;
+            var probeMesh = Instantiate(src); probeMesh.SetVertices(target); probeMesh.RecalculateNormals();
+            var newNormals = probeMesh.normals; Destroy(probeMesh);
+            var finalNormals = origNormals.Length == verts.Length ? (Vector3[])origNormals.Clone() : newNormals;
+            if (origNormals.Length == verts.Length)
+            {
+                var isChanged = new HashSet<int>(changed);
+                var tris = src.triangles;
+                for (int t = 0; t < tris.Length; t += 3)
+                    if (isChanged.Contains(tris[t]) || isChanged.Contains(tris[t + 1]) || isChanged.Contains(tris[t + 2]))
+                        for (int j = 0; j < 3; j++) finalNormals[tris[t + j]] = newNormals[tris[t + j]];
+            }
+
+            HideDecorOverGap(c, axis, side, half, axialMax, waterY);
+
+            // la franja se desploma con los tablones
+            var cur = (Vector3[])verts.Clone();
+            for (float t = 0f; t < 1f && bedMesh != null; t += Time.deltaTime / Mathf.Max(0.01f, seconds))
+            {
+                float e = t * t;
+                foreach (int i in changed) cur[i] = Vector3.LerpUnclamped(verts[i], target[i], e);
+                bedMesh.SetVertices(cur);
+                yield return null;
+            }
+            if (bedMesh == null) yield break;                                 // se reparó antes de terminar
+            bedMesh.SetVertices(target);
+            bedMesh.SetNormals(finalNormals);
+            bedMesh.RecalculateBounds();
+        }
+
+        /// Piedras, hierba o flores que estaban sobre la franja de tierra: se ocultan mientras el puente está roto.
+        void HideDecorOverGap(Vector3 c, Vector3 axis, Vector3 side, float half, float axialMax, float waterY)
+        {
+            Transform bridgeGroup = deck != null ? deck.parent : null;
+            foreach (var r in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+            {
+                if (!r.enabled || !r.gameObject.isStatic || r is ParticleSystemRenderer) continue;
+                if (r.transform.IsChildOf(transform) || (bridgeGroup != null && r.transform.IsChildOf(bridgeGroup))) continue;
+                Bounds b = r.bounds;
+                if (b.size.magnitude > 5f || b.center.y < waterY + 0.3f) continue;
+                Vector3 d = b.center - c;
+                if (Mathf.Abs(Vector3.Dot(d, side)) >= half || Mathf.Abs(Vector3.Dot(d, axis)) > axialMax - 0.6f) continue;
+                if (IsShallow(b.center, waterY)) continue;
+                r.enabled = false;
+                hiddenDecor.Add(r);
+            }
+        }
+
+        /// Agranda el Blocker (solo a lo largo del puente) para cubrir todo el tramo donde ahora se ve agua,
+        /// sin pasar del punto donde queda el mago al ser empujado. Al reparar se recupera el tamaño original.
+        Vector3? blockerSize, blockerCenter;
+        void FitBlocker(float minA, float maxA)
+        {
+            if (blocker == null) return;
+            BridgeAxes(out Vector3 axis, out _, out _);
+            Vector3 la = blocker.transform.InverseTransformDirection(axis);
+            bool lx = Mathf.Abs(la.x) >= Mathf.Abs(la.z);
+            float sign = Mathf.Sign(lx ? la.x : la.z);
+            Vector3 size = blocker.size, center = blocker.center;
+            blockerSize ??= size; blockerCenter ??= center;
+            float cur = (lx ? center.x : center.z) * sign, half = (lx ? size.x : size.z) * 0.5f;
+            float limit = LongHalf() - 1.6f;
+            float lo = Mathf.Max(-limit, Mathf.Min(cur - half, minA - 0.4f));
+            float hi = Mathf.Min(limit, Mathf.Max(cur + half, maxA + 0.4f));
+            if (hi <= lo) return;
+            if (lx) { size.x = hi - lo; center.x = (hi + lo) * 0.5f * sign; }
+            else { size.z = hi - lo; center.z = (hi + lo) * 0.5f * sign; }
+            blocker.size = size; blocker.center = center;
+            PushPlayerOffBlocker();
+            PushEnemiesOffBridge();
+        }
+
+        void CloseRiverBed()
+        {
+            if (blocker != null && blockerSize.HasValue) { blocker.size = blockerSize.Value; blocker.center = blockerCenter.Value; }
+            if (bedProxy != null) { Destroy(bedProxy); if (bedHiddenRenderer != null) bedHiddenRenderer.enabled = true; }
+            else if (bedFilter != null && bedOriginal != null) bedFilter.sharedMesh = bedOriginal;
+            if (bedMesh != null) Destroy(bedMesh);
+            foreach (var r in hiddenDecor) if (r != null) r.enabled = true;
+            hiddenDecor.Clear();
+            bedMesh = null; bedOriginal = null; bedFilter = null; bedProxy = null; bedHiddenRenderer = null;
+        }
+
+        /// El MeshCollider más grande bajo el centro del puente (el terreno), ignorando la propia estructura.
+        MeshCollider TerrainUnderBridge()
+        {
+            MeshCollider best = null; float bestSize = 0f;
+            foreach (var h in Physics.RaycastAll(transform.position + Vector3.up * 40f, Vector3.down, 120f, ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (!(h.collider is MeshCollider mc)) continue;
+                float size = mc.bounds.size.sqrMagnitude;
+                if (size > bestSize) { best = mc; bestSize = size; }
+            }
+            return best;
+        }
+
+        /// Ajusta el empuje a lo largo del puente de cada pieza que cae para que aterrice dentro del cauce
+        /// (con su parábola: mismo salto vertical, distinto avance).
+        void AimIntoRiver(float waterY)
+        {
+            RiverSpan(waterY, out float min, out float max);
+            BridgeAxes(out Vector3 axis, out _, out _);
+            float g = -Physics.gravity.y;
+            foreach (var p in pieces)
+            {
+                if (!p.falls || p.t == null) continue;
+                float drop = Mathf.Max(0.1f, p.t.position.y - waterY);
+                float flight = (p.vel.y + Mathf.Sqrt(p.vel.y * p.vel.y + 2f * g * drop)) / g;
+                float a0 = Vector3.Dot(p.t.position - transform.position, axis);
+                float va = Vector3.Dot(p.vel, axis);
+                float want = a0 + va * flight, land = want;
+                // si iba a caer en la orilla, aterriza en la mitad del cauce de ese lado (sin apilarse en el borde)
+                if (want > max) land = Random.Range(Mathf.Lerp(min, max, 0.55f), max);
+                else if (want < min) land = Random.Range(min, Mathf.Lerp(min, max, 0.45f));
+                p.vel += axis * ((land - a0) / flight - va);
+            }
         }
 
         float WaterLevel()
@@ -437,6 +836,7 @@ namespace MageHero
             ps.transform.rotation = Quaternion.LookRotation(Vector3.up);
             ps.Emit(Mathf.RoundToInt(30 * size));
             Destroy(ps.gameObject, 2f);
+            WaterRipples.Add(at, size * 1.1f);                                 // anillo de espuma en la superficie (shader)
             var ring = CineGlow.Motes("Ondas", null, at, new Color(0.7f, 0.9f, 1.1f), 0f, 0.5f * size, 1.6f, 0.8f, 0.1f, 0f);
             var rsh = ring.shape; rsh.shapeType = ParticleSystemShapeType.Circle; rsh.radius = 0.2f;
             ring.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
@@ -476,6 +876,17 @@ namespace MageHero
         {
             var r = t.GetComponent<Renderer>();
             Renderer original = null;
+            // Piezas vestidas (BridgeDresser): lo que se ve son sus hijos, que siguen al transform al animarlo.
+            bool dressed = t.GetComponent<BridgeDressPart>() != null || (dress != null && t.IsChildOf(dress.container));
+            if (dressed)
+            {
+                var visible = new List<Renderer>();
+                foreach (var cr in t.GetComponentsInChildren<Renderer>()) if (cr.enabled) visible.Add(cr);
+                var dp = new Piece { t = t, pos = t.position, rot = t.rotation, brokenPos = brokenPos, brokenRot = brokenRot, rs = visible.ToArray(), seed = Random.value * 10f };
+                dp.mats = System.Array.ConvertAll(dp.rs, x => x.sharedMaterial);
+                pieces.Add(dp);
+                return dp;
+            }
             // En los niveles cuyas piezas son estáticas (static batching) moverlas no cambia lo que se ve:
             // se oculta la original y se anima una copia con la misma forma y material.
             if (r != null && r.isPartOfStaticBatch)
@@ -497,7 +908,8 @@ namespace MageHero
                 r.enabled = false;
                 t = proxy.transform; r = pr;
             }
-            var piece = new Piece { t = t, pos = t.position, rot = t.rotation, brokenPos = brokenPos, brokenRot = brokenRot, r = r, mat = r != null ? r.sharedMaterial : null, original = original, seed = Random.value * 10f };
+            var piece = new Piece { t = t, pos = t.position, rot = t.rotation, brokenPos = brokenPos, brokenRot = brokenRot, original = original, seed = Random.value * 10f,
+                                    rs = r != null ? new[] { r } : new Renderer[0], mats = r != null ? new[] { r.sharedMaterial } : new Material[0] };
             pieces.Add(piece);
             return piece;
         }
@@ -522,7 +934,8 @@ namespace MageHero
             if (Vector3.Dot(toPlayer, side) < 0f) side = -side;
             StartCoroutine(CamMove(cam, c + side * (len * 1.05f + 5f) + Vector3.up * 4.5f - axis * 2f, c, 1.2f, 44f));
 
-            foreach (var p in pieces) if (p.r != null && repairGlowMaterial != null) p.r.sharedMaterial = repairGlowMaterial;
+            if (repairGlowMaterial != null)
+                foreach (var p in pieces) foreach (var pr in p.rs) if (pr != null) pr.sharedMaterial = repairGlowMaterial;
             var lightGo = new GameObject("RepairLight");
             lightGo.transform.position = transform.position + Vector3.up * 2f;
             var light = lightGo.AddComponent<Light>(); light.type = LightType.Point; light.range = 14f; light.intensity = 4f; light.color = new Color(0.5f, 1f, 1f);
@@ -544,15 +957,17 @@ namespace MageHero
                 CineGlow.Burst(c + axis * f * len + Vector3.up * 0.4f, new Color(1.6f, 2.4f, 2.6f), 14, 1.6f, 0.1f, 1f, -0.3f);
             }
             CameraShake3D.Shake(0.12f, 0.3f);
-            foreach (var p in pieces) if (p.r != null) p.r.sharedMaterial = p.mat;
+            foreach (var p in pieces) for (int i = 0; i < p.rs.Length; i++) if (p.rs[i] != null) p.rs[i].sharedMaterial = p.mats[i];
             Destroy(lightGo);
 
             foreach (var p in pieces) if (p.original != null) { p.original.enabled = true; Destroy(p.t.gameObject); }
             foreach (var s in deckSegments) Destroy(s);
             deckSegments.Clear();
             if (deckRenderer != null) deckRenderer.enabled = true;
+            if (dress != null) { dress.Rest(); dress.animating = false; }        // los tablones vuelven a ceder bajo los pies
             blocker.enabled = false;
             gapWater.SetActive(false);
+            CloseRiverBed();
             yield return new WaitForSeconds(0.8f);
 
             if (follow != null) follow.enabled = true;
@@ -649,13 +1064,9 @@ namespace MageHero
             }
             if (gapWater == null)
             {
-                gapWater = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                gapWater.name = "GapWater";
-                DestroyImmediate(gapWater.GetComponent<Collider>());
-                gapWater.transform.SetParent(transform, false);
+                // Solo un marcador del hueco (sin malla): el agua que se ve es la del río, con el shader ToonWater.
+                gapWater = NewChild("GapWater");
                 gapWater.transform.localPosition = Vector3.up * (topY + 0.02f);
-                gapWater.transform.localScale = Box(len * 0.55f, 0.06f, wid - 0.3f);
-                if (gapMaterial != null) gapWater.GetComponent<Renderer>().sharedMaterial = gapMaterial;
                 gapWater.SetActive(false);
             }
         }

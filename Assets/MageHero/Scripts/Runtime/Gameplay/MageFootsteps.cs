@@ -75,7 +75,7 @@ namespace MageHero
             if (clips.Length > 1 && i == lastIndex) i = (i + 1) % clips.Length;
             lastIndex = i;
             source.pitch = pitchBase * Random.Range(0.92f, 1.08f);
-            source.PlayOneShot(clips[i], volume * volumeScale * Random.Range(0.9f, 1f));
+            source.PlayOneShot(clips[i], volume * volumeScale * Random.Range(0.9f, 1f) * GameSettings.Sfx);
         }
     }
 }

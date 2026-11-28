@@ -5,9 +5,8 @@ using UnityEngine.UI;
 
 namespace MageHero
 {
-    /// Gráficos de la interfaz generados por código (sin imágenes externas), con ESTILO LOW POLY a juego con el mundo:
-    /// paneles con esquinas en bisel y relleno facetado, botones octogonales tipo gema, banderolas rectas con cola en V
-    /// y un fondo de montañas low poly. Paleta otoñal apagada (no chillona) y textos con una sola sombra.
+    /// Gráficos de la interfaz generados por código. Los botones, cintas y ventanas usan el kit GameGui
+    /// (estilo "Low Poly Game GUI" de Diseños/MenuPrincipal); aquí quedan los paneles del HUD, barras y utilidades.
     public static class MenuStyle
     {
         public static readonly Color Orange = Hex(0xe8863a), OrangeDark = Hex(0xa9521d);
@@ -56,13 +55,7 @@ namespace MageHero
         }
 
         /// Banderola del título: banda recta facetada con cola en V en los dos extremos.
-        public static Sprite Ribbon(Color fill, Color border, int w = 512, int h = 128)
-        {
-            string key = $"ri{fill}{border}{w}{h}";
-            if (Cache.TryGetValue(key, out var cached) && cached != null) return cached;
-            var sp = LowPolyUI.Paint(key, w, h, LowPolyUI.Banner(w, h, 36f), fill, Darker(fill, 0.86f), border, 5, 23, 0.07f, default, 44);
-            return Cache[key] = sp;
-        }
+        public static Sprite Ribbon(Color fill, Color border, int w = 512, int h = 128) => GameGui.RibbonSprite(fill);   // cinta con pliegues (GameGui)
 
         /// Fondo del menú: cielo de atardecer en facetas y tres capas de montañas low poly (como el borde de los mapas).
         public static Texture2D Background(int w = 640, int h = 360, int seed = 7)
@@ -190,46 +183,10 @@ namespace MageHero
 
         /// Botón redondeado con brillo, sombra, rebote al pasar el ratón y texto con contorno.
         public static Button GlossyButton(string name, Transform parent, string text, Color color, int fontSize, System.Action onClick)
-        {
-            Color dark = Darker(color);
-            var img = Image(name, parent, RoundedRect(Color.Lerp(color, Color.white, 0.18f), Darker(color, 0.85f), dark), Color.white);
-            img.raycastTarget = true;
-            var sh = img.gameObject.AddComponent<Shadow>(); sh.effectColor = new Color(0, 0, 0, .5f); sh.effectDistance = new Vector2(0, -6);
-
-            var gloss = Image("Gloss", img.transform, Gloss(), Color.white);
-            gloss.rectTransform.anchorMin = new Vector2(0f, 0.5f); gloss.rectTransform.anchorMax = new Vector2(1f, 1f);
-            gloss.rectTransform.offsetMin = new Vector2(10f, 0f); gloss.rectTransform.offsetMax = new Vector2(-10f, -7f);
-
-            var label = Label(img.transform, text, fontSize, Color.white, dark);
-            Stretch(label.rectTransform);
-
-            var b = img.gameObject.AddComponent<Button>();
-            b.targetGraphic = img;
-            var colors = b.colors;
-            colors.highlightedColor = new Color(1.0f, 1.0f, 1.0f); colors.pressedColor = new Color(.82f, .82f, .82f);
-            colors.selectedColor = Color.white; colors.fadeDuration = 0.08f;
-            b.colors = colors;
-            var nav = b.navigation; nav.mode = Navigation.Mode.None; b.navigation = nav;
-            if (onClick != null) b.onClick.AddListener(() => onClick());
-            img.gameObject.AddComponent<ButtonBounce>();
-            return b;
-        }
+            => GameGui.Button(parent, name, text, color, GameGui.Icon.None, onClick, fontSize);
 
         public static Button RoundButton(string name, Transform parent, string symbol, Color color, int size, System.Action onClick)
-        {
-            var img = Image(name, parent, Circle(Color.Lerp(color, Color.white, 0.2f), Darker(color, 0.8f), Color.white), Color.white);
-            img.raycastTarget = true;
-            img.rectTransform.sizeDelta = new Vector2(size, size);
-            var sh = img.gameObject.AddComponent<Shadow>(); sh.effectColor = new Color(0, 0, 0, .5f); sh.effectDistance = new Vector2(0, -5);
-            var label = Label(img.transform, symbol, (int)(size * 0.5f), Color.white, Darker(color));
-            Stretch(label.rectTransform);
-            var b = img.gameObject.AddComponent<Button>();
-            b.targetGraphic = img;
-            var nav = b.navigation; nav.mode = Navigation.Mode.None; b.navigation = nav;
-            if (onClick != null) b.onClick.AddListener(() => onClick());
-            img.gameObject.AddComponent<ButtonBounce>();
-            return b;
-        }
+            => GameGui.Button(parent, name, symbol, color, GameGui.Icon.None, onClick, (int)(size * 0.5f), new Vector2(size, size));
 
         public static void Place(RectTransform rt, Vector2 anchor, Vector2 pos, Vector2 size)
         {
@@ -258,26 +215,19 @@ namespace MageHero
         /// Devuelve el panel, donde se coloca el contenido. root = objeto a activar/desactivar.
         public static RectTransform Window(Transform parent, string name, string title, Vector2 size, Color ribbon, System.Action onClose, out GameObject root, bool dim = true)
         {
-            var overlay = Image(name, parent, null, new Color(0f, 0f, 0f, dim ? 0.62f : 0f));
+            var overlay = Image(name, parent, null, new Color(0.02f, 0.07f, 0.09f, dim ? 0.62f : 0f));
             overlay.raycastTarget = true;                                    // bloquea los clics al juego
             Stretch(overlay.rectTransform);
             root = overlay.gameObject;
 
-            var box = Image("Box", overlay.transform, PanelSprite(ribbon), Color.white);
+            var box = GameGui.Panel(overlay.transform, "Box", size, light: false);
             Place(box.rectTransform, new Vector2(.5f, .5f), new Vector2(0f, -18f), size);
-            var sh = box.gameObject.AddComponent<Shadow>(); sh.effectColor = new Color(0, 0, 0, .55f); sh.effectDistance = new Vector2(0, -8);
 
             if (!string.IsNullOrEmpty(title))
             {
-                var r = Image("Ribbon", box.transform, Ribbon(ribbon, Darker(ribbon, 0.7f)), Color.white);
-                Place(r.rectTransform, new Vector2(.5f, 1f), new Vector2(0f, 6f), new Vector2(Mathf.Min(size.x * 0.7f, 560f), 92f));
-                var rs = r.gameObject.AddComponent<Shadow>(); rs.effectColor = new Color(0, 0, 0, .45f); rs.effectDistance = new Vector2(0, -6);
-                var t = Label(r.transform, title, 40, Color.white, Darker(ribbon, 0.6f));
-                // Títulos largos (p. ej. el del puente) se encogen para caber en la cinta.
-                t.horizontalOverflow = HorizontalWrapMode.Wrap; t.verticalOverflow = VerticalWrapMode.Truncate;
-                t.resizeTextForBestFit = true; t.resizeTextMinSize = 18; t.resizeTextMaxSize = 40;
-                Stretch(t.rectTransform);
-                t.rectTransform.offsetMin = new Vector2(36, 4); t.rectTransform.offsetMax = new Vector2(-36, 0);
+                var r = GameGui.Ribbon(box.transform, title, new Vector2(Mathf.Min(size.x * 0.75f, 560f), 70f), ribbon, 32);
+                r.name = "Ribbon";                                           // otros scripts buscan la cinta por este nombre (p. ej. el pergamino)
+                Place(r.rectTransform, new Vector2(.5f, 1f), new Vector2(0f, 10f), new Vector2(Mathf.Min(size.x * 0.75f, 560f), 70f));
             }
             if (onClose != null) CloseButton(box.transform, onClose);
             return box.rectTransform;
@@ -294,23 +244,8 @@ namespace MageHero
         /// Botón brillante cuyo color se cambia con Image.color (respuestas del quiz, botones del HUD).
         public static Button TintButton(string name, Transform parent, string text, Color tint, int fontSize, System.Action onClick, Color? textColor = null)
         {
-            var img = Image(name, parent, TintSprite(), tint);
-            img.raycastTarget = true;
-            var sh = img.gameObject.AddComponent<Shadow>(); sh.effectColor = new Color(0, 0, 0, .45f); sh.effectDistance = new Vector2(0, -5);
-            var gloss = Image("Gloss", img.transform, Gloss(), Color.white);
-            gloss.rectTransform.anchorMin = new Vector2(0f, 0.5f); gloss.rectTransform.anchorMax = new Vector2(1f, 1f);
-            gloss.rectTransform.offsetMin = new Vector2(9f, 0f); gloss.rectTransform.offsetMax = new Vector2(-9f, -6f);
-            var label = Label(img.transform, text, fontSize, textColor ?? Color.white, new Color(0f, 0f, 0f, 0.55f));
-            Stretch(label.rectTransform);
-            var b = img.gameObject.AddComponent<Button>();
-            b.targetGraphic = img;
-            var colors = b.colors;
-            colors.normalColor = Color.white; colors.highlightedColor = new Color(1.08f, 1.08f, 1.08f); colors.pressedColor = new Color(.82f, .82f, .82f);
-            colors.selectedColor = Color.white; colors.disabledColor = Color.white; colors.fadeDuration = 0.08f;
-            b.colors = colors;
-            var nav = b.navigation; nav.mode = Navigation.Mode.None; b.navigation = nav;
-            if (onClick != null) b.onClick.AddListener(() => onClick());
-            img.gameObject.AddComponent<ButtonBounce>();
+            var b = GameGui.Button(parent, name, text, tint, GameGui.Icon.None, onClick, fontSize);
+            var l = GameGui.Label(b); if (l != null && textColor.HasValue) l.color = textColor.Value;
             return b;
         }
 

@@ -11,10 +11,14 @@ namespace MageHero
         readonly List<int> t = new List<int>();
         readonly List<Color> c = new List<Color>();
         readonly List<Vector2> uv = new List<Vector2>();
+        readonly List<Vector3> grains = new List<Vector3>();
         Matrix4x4 m = Matrix4x4.identity;
         Color col = Color.white;
+        Vector3 grain = Vector3.up;
 
         public LowPoly Paint(Color k) { col = k; return this; }
+        /// Dirección de la fibra (local a la pieza, antes de At) para el shader MageHero/ToonDetail en modo madera.
+        public LowPoly Grain(Vector3 localDir) { grain = localDir; return this; }
         /// Transformación que se aplica a las piezas que se añadan después.
         public LowPoly At(Vector3 pos, Quaternion rot, Vector3 scale) { m = Matrix4x4.TRS(pos, rot, scale); return this; }
         public LowPoly At(Vector3 pos) => At(pos, Quaternion.identity, Vector3.one);
@@ -26,6 +30,8 @@ namespace MageHero
             v.Add(m.MultiplyPoint3x4(a)); v.Add(m.MultiplyPoint3x4(b)); v.Add(m.MultiplyPoint3x4(d));
             c.Add(col); c.Add(col); c.Add(col);
             uv.Add(Vector2.zero); uv.Add(Vector2.up); uv.Add(Vector2.one);
+            Vector3 g = m.MultiplyVector(grain).normalized;
+            grains.Add(g); grains.Add(g); grains.Add(g);
             t.Add(i); t.Add(i + 1); t.Add(i + 2);
         }
 
@@ -117,7 +123,7 @@ namespace MageHero
         {
             var mesh = new Mesh { name = name };
             if (v.Count > 65000) mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-            mesh.SetVertices(v); mesh.SetTriangles(t, 0); mesh.SetColors(c); mesh.SetUVs(0, uv);
+            mesh.SetVertices(v); mesh.SetTriangles(t, 0); mesh.SetColors(c); mesh.SetUVs(0, uv); mesh.SetUVs(1, grains);
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;

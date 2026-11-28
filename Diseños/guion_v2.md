@@ -1,6 +1,20 @@
 # MAGO DE LOS NÚMEROS — Cinemática de apertura (v2)
 
-**Versión visual · sin diálogos · duración aprox. 2:00 · se puede saltar (Esc)**
+**Versión corta (v3) · ≈ 15 segundos · voz en off femenina (español de México) · se puede saltar (Esc)**
+
+> **Lo que se ve en el juego (v3):**
+>
+> | Tiempo | Plano | Voz en off |
+> |---|---|---|
+> | 0–3 s | El mago tala y parte el tronco | "En la Arboleda de Otoño, un joven mago entrenaba en calma…" |
+> | 3–6 s | Mira al cielo del sur: cae el meteorito (destello, temblor, columna de humo) | "…hasta que el cielo se rasgó y cayó el Gran Cero." |
+> | 6–8 s | Las aves y los animales escapan | — |
+> | 8–11 s | Suelta el hacha y empuña el báculo, que se enciende | "Era hora de tomar el báculo y convertirse en el Mago de los Números." |
+> | 11–15 s | Camina hacia el sendero; cae un árbol y aparece el Gólem (título encima) | — |
+>
+> Después empieza el tutorial. Las escenas largas de abajo (v2) quedan como referencia de la historia.
+
+*(v2, referencia)* Versión visual · sin diálogos · duración aprox. 2:00
 Basado en `guion.txt` (v1), con estos cambios aprobados:
 
 - La cabaña y el inicio del juego pasan a la **Arboleda de Otoño** (Nivel 1).
@@ -18,7 +32,7 @@ Basado en `guion.txt` (v1), con estos cambios aprobados:
 
 **EL MAGO JOVEN (20 años).** Ágil, ropa práctica y algo gastada, sombrero de mago. Su báculo duerme apoyado contra la cabaña: las runas numéricas grabadas en él están apagadas. Aprende con la práctica y el esfuerzo.
 
-**EL ESPÍRITU DEL MAESTRO ATHAN.** Una esfera de luz viva, como un fuego fatuo: núcleo blanco brillante, capa azul celeste con borde luminoso, halo suave y pequeñas chispas que orbitan a su alrededor dejando estela. Flota a la altura de la cabeza del joven. "Señala" enviando una chispa dorada, con la que también **dibuja números de luz en el aire**. En la cinemática cuenta la historia una **voz en off** (español de México, con subtítulos); en el tutorial que sigue, la voz es la del propio maestro y el orbe late mientras habla.
+**EL ESPÍRITU DEL MAESTRO ATHAN.** Una esfera de luz viva, como un fuego fatuo: núcleo blanco brillante, capa azul celeste con borde luminoso, halo suave y pequeñas chispas que orbitan a su alrededor dejando estela. Flota a la altura de la cabeza del joven. "Señala" enviando una chispa dorada, con la que también **dibuja números de luz en el aire**. En la cinemática cuenta la historia una **voz en off femenina** (español de México, con subtítulos); en el tutorial que sigue, la voz es la del propio maestro y el orbe late mientras habla.
 
 **TUTORIAL (tras la cinemática).** El Gólem se queda quieto en el prado, que está despejado, y el maestro enseña los controles: moverse (WASD/flechas), correr (Shift), saltar (Espacio), girar la cámara (Q/E o clic derecho), acercar o alejar (rueda o Z/X), el mapa (M), el menú de pausa (Esc) y el ataque (clic izquierdo o Enter, 3 aciertos al Gólem). Con Tab se omite. Al terminar, el Gólem huye al bosque y derriba los árboles a su paso.
 

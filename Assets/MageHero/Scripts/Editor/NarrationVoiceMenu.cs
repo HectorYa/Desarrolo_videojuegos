@@ -9,14 +9,14 @@ using Debug = UnityEngine.Debug;
 namespace MageHero.Editor
 {
     /// Genera los audios de la voz en off (Narrator.Lines) en Assets/MageHero/Resources/Audio/Narracion.
-    /// Motor preferido: edge-tts con la voz neuronal "es-MX-JorgeNeural" (español de México, requiere internet y
+    /// Motor preferido: edge-tts con la voz neuronal femenina "es-MX-DaliaNeural" (español de México, requiere internet y
     /// `pip install edge-tts`). Si no está instalado, usa las voces de Windows: primero una es-MX (Sabina / Raúl,
     /// se instalan en Configuración ▸ Hora e idioma ▸ Voz ▸ Agregar voces ▸ Español (México)) y, si no hay,
     /// cualquier voz en español avisando de que el acento no es mexicano.
     public static class NarrationVoiceMenu
     {
         const string OutDir = "Assets/MageHero/Resources/Audio/Narracion";
-        const string EdgeVoice = "es-MX-JorgeNeural";
+        const string EdgeVoice = "es-MX-DaliaNeural";      // voz femenina de México
 
         [MenuItem("Tools/Mage Hero/Cinemática/Generar voz en off (español de México)")]
         static void Generate()

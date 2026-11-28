@@ -78,7 +78,8 @@ namespace MageHero.Editor
                 manager.BuildHelpers();
             }
             manager.gapMaterial = gapMat; manager.villainDarkMaterial = darkMat; manager.villainRedMaterial = redMat; manager.repairGlowMaterial = glowCyan;
-            if (manager.gapWater != null) manager.gapWater.GetComponent<Renderer>().sharedMaterial = gapMat;
+            var gapRenderer = manager.gapWater != null ? manager.gapWater.GetComponent<Renderer>() : null;
+            if (gapRenderer != null) gapRenderer.sharedMaterial = gapMat;
 
             // ---------- 3. Pergamino de Athan en una zona alterna (del lado del jugador, sin cruzar agua)
             var clue = Object.FindAnyObjectByType<ClueItemSystem>();

@@ -24,8 +24,18 @@ Material:
     serializedVersion: 3
     m_TexEnvs: []
     m_Ints: []
-    m_Floats: []
+    m_Floats:
+    - _DeepDist: 2.2
+    - _FlowSpeed: 0.45
+    - _FoamDist: 0.9
+    - _LineAmount: 0.5
+    - _LineScale: 0.45
+    - _Sparkle: 0.9
+    - _WaveHeight: 0.05
     m_Colors:
     - _BaseColor: {r: 0.49803922, g: 0.8901961, b: 0.76862746, a: 0.8}
+    - _DeepTint: {r: 0.08, g: 0.28, b: 0.5, a: 1}
+    - _FlowDir: {r: 1, g: 0, b: 0.35, a: 0}
+    - _FoamColor: {r: 1, g: 1, b: 1, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

@@ -6,8 +6,10 @@ namespace MageHero
 {
     /// Gólem de Piedra (sirviente del Gran Cero): modelo y animación compartidos por la cinemática de apertura
     /// y por el jefe del Nivel 1 (GolemBoss).
-    /// Diseño: rocas cubiertas de musgo y hojas de otoño, grietas de lava, cristales en la espalda, ojos de magma
-    /// y una operación que arde en el pecho.
+    /// Diseño (Diseños/Enemigo/Golem.png): low poly robusto y asimétrico —un brazo derecho gigante hecho de
+    /// segmentos de roca con un puño enorme y un brazo izquierdo normal—, postura encorvada con la cabeza hundida
+    /// en el torso, ojos y boca encendidos, piedra gris facetada y fisuras de lava naranja entre las placas.
+    /// En el pecho arde la operación que hay que resolver.
     /// Animación procedural "con peso": piernas con rodilla (se dobla al dar el paso y el pie no patina),
     /// la cadera baja en cada pisada y se desplaza sobre la pierna de apoyo, los brazos siguen con inercia
     /// (resortes) y en reposo respira y cambia el peso de pierna.
@@ -21,7 +23,12 @@ namespace MageHero
         // Articulaciones
         Transform body, hips, torso, head, legL, legR, kneeL, kneeR, shoulderL, shoulderR, elbowL, elbowR, fistL, fistR;
         Transform wheel;                                   // forma de rueda (oculta salvo al rodar)
-        Material eyeMat, crackMat, chestMat;
+        Material eyeMat, crackMat, chestMat, rockMat;
+        // Detalle "realista": destello y retroceso al recibir golpes, daño progresivo (venas de lava que se abren
+        // y trozos de roca que se desprenden), pisadas con polvo y guijarros que se le caen al andar.
+        float flash, hitKick, damage, damageTarget, prevStepCos, nextPebble;
+        int brokenChunks;
+        static readonly (float at, string name)[] BreakOrder = { (0.3f, "Hombrera_R2"), (0.55f, "Joroba2"), (0.8f, "Pomulo_L") };
         Light coreLight;
         GlowNumber chestText;
         ParticleSystem embers;
@@ -45,10 +52,12 @@ namespace MageHero
         public Vector3 HandsCenter => (fistL.position + fistR.position) * 0.5f;
         public bool IsWheel => curl > 0.5f;
 
-        static readonly Color StoneA = MenuStyle.Hex(0x9a9189), StoneB = MenuStyle.Hex(0x7d746b), StoneC = MenuStyle.Hex(0xb0a69a);
-        static readonly Color MossA = MenuStyle.Hex(0x6f9a3c), MossB = MenuStyle.Hex(0x58823a);
-        static readonly Color LeafA = MenuStyle.Hex(0xe0772a), LeafB = MenuStyle.Hex(0xc9452b), LeafC = MenuStyle.Hex(0xf2b13a);
+        static readonly Color StoneA = MenuStyle.Hex(0x8e8881), StoneB = MenuStyle.Hex(0x6c6760), StoneC = MenuStyle.Hex(0xb4ada3);
+        static readonly Color Belly = MenuStyle.Hex(0x4c4743);          // partes en sombra (vientre, piernas)
+        const float BaseHunch = 14f;                                     // postura encorvada en reposo (grados)
         static readonly Color Lava = new Color(3.2f, 1.05f, 0.22f), Eye = new Color(4.5f, 1.6f, 0.3f);
+        static readonly int FlashId = Shader.PropertyToID("_Flash"), DamageId = Shader.PropertyToID("_Damage"),
+                            VeinGlowId = Shader.PropertyToID("_VeinGlow"), VeinColorId = Shader.PropertyToID("_VeinColor");
 
         public static StoneGolem Create(Vector3 position, Quaternion rotation)
         {
@@ -67,94 +76,119 @@ namespace MageHero
         {
             crackMat = CineGlow.Make(Lava, 0f, 1f, 0.35f);
             eyeMat = CineGlow.Make(Eye, 0f, 1f, 0.1f);
-            var rock = IntroSet.VertexToon();
+            rockMat = DetailMaterials.Stone(2.6f, 0.18f);                       // piedra moteada con musgo y venas de lava
+            var rock = rockMat;
 
             body = LowPoly.Pivot("Cuerpo", transform, Vector3.zero);
             hips = LowPoly.Pivot("Cadera", body, new Vector3(0, 1.6f, 0));
-            Chunk(hips, "Pelvis", Vector3.zero, new Vector3(1.25f, 0.6f, 0.85f), 1, StoneB, rock);
+            Chunk(hips, "Pelvis", Vector3.zero, new Vector3(1.3f, 0.62f, 0.9f), 1, Belly, rock);
+            Crack(hips, new Vector3(0, 0.22f, 0.3f), new Vector3(0.702f, 0.035f, 0.234f), 6f);
 
-            // Piernas con rodilla: muslo (cadera→rodilla) y espinilla + pie (rodilla→suelo).
-            legL = LowPoly.Pivot("Pierna_L", hips, new Vector3(-0.5f, -0.12f, 0));
-            legR = LowPoly.Pivot("Pierna_R", hips, new Vector3(0.5f, -0.12f, 0));
+            // Piernas cortas y oscuras (en sombra bajo el torso), con rodilla: muslo y espinilla + pie.
+            legL = LowPoly.Pivot("Pierna_L", hips, new Vector3(-0.52f, -0.12f, 0));
+            legR = LowPoly.Pivot("Pierna_R", hips, new Vector3(0.52f, -0.12f, 0));
             foreach (var (leg, s) in new[] { (legL, 2), (legR, 3) })
             {
-                Chunk(leg, "Muslo", new Vector3(0, -0.36f, 0), new Vector3(0.78f, 0.8f, 0.78f), 10 + s, StoneA, rock);
+                Chunk(leg, "Muslo", new Vector3(0, -0.36f, 0), new Vector3(0.82f, 0.82f, 0.8f), 10 + s, Belly, rock);
                 var knee = LowPoly.Pivot("Rodilla", leg, new Vector3(0, -0.72f, 0.02f));
-                Chunk(knee, "Espinilla", new Vector3(0, -0.3f, 0), new Vector3(0.7f, 0.65f, 0.7f), 15 + s, StoneB, rock);
-                Chunk(knee, "Pie", new Vector3(0, -0.62f, 0.14f), new Vector3(0.95f, 0.42f, 1.2f), 20 + s, StoneB, rock);
-                Crack(knee, new Vector3(0, 0.02f, 0.2f), new Vector3(0.48f, 0.05f, 0.38f), 12f);
+                Chunk(knee, "Espinilla", new Vector3(0, -0.3f, 0), new Vector3(0.72f, 0.66f, 0.72f), 15 + s, StoneB, rock);
+                Chunk(knee, "Pie", new Vector3(0, -0.62f, 0.16f), new Vector3(1.0f, 0.42f, 1.25f), 20 + s, StoneB, rock);
+                Crack(knee, new Vector3(0, 0.02f, 0.22f), new Vector3(0.39f, 0.035f, 0.296f), 12f);
                 if (leg == legL) kneeL = knee; else kneeR = knee;
             }
 
-            // Torso: gran roca + espalda + hombreras, con musgo, hojas y cristales de lava.
+            // Torso: gran masa encorvada. Pecho ancho, joroba alta en la espalda y vientre oscuro.
             torso = LowPoly.Pivot("Torso", hips, new Vector3(0, 0.25f, 0));
-            Chunk(torso, "Pecho", new Vector3(0, 1.05f, 0), new Vector3(1.85f, 1.45f, 1.25f), 31, StoneA, rock);
-            Chunk(torso, "Espalda", new Vector3(0, 1.35f, -0.45f), new Vector3(1.6f, 1.1f, 0.9f), 32, StoneB, rock);
-            Chunk(torso, "Hombrera_L", new Vector3(-1.05f, 1.65f, 0), new Vector3(0.9f, 0.7f, 0.9f), 33, StoneC, rock);
-            Chunk(torso, "Hombrera_R", new Vector3(1.05f, 1.65f, 0), new Vector3(0.9f, 0.7f, 0.9f), 34, StoneC, rock);
-            Moss(torso, new Vector3(-1.05f, 1.98f, 0.02f), new Vector3(0.85f, 0.25f, 0.8f), 81);
-            Moss(torso, new Vector3(1.05f, 1.98f, -0.02f), new Vector3(0.8f, 0.22f, 0.85f), 82);
-            Moss(torso, new Vector3(0.1f, 1.88f, -0.45f), new Vector3(1.3f, 0.3f, 0.75f), 83);
-            Leaves(torso, new Vector3(0, 2.0f, -0.4f), 1.1f, 16, 91);
-            Leaves(torso, new Vector3(-1.05f, 2.05f, 0f), 0.4f, 6, 92);
-            // cristales de lava que sobresalen de la espalda
-            var crystals = new LowPoly().Paint(Color.white);
-            for (int i = 0; i < 5; i++)
-            {
-                float x = -0.55f + i * 0.28f, h = 0.35f + (i % 2) * 0.25f + (i == 2 ? 0.2f : 0f);
-                crystals.At(new Vector3(x, 1.6f + (i % 2) * 0.1f, -0.85f), Quaternion.Euler(-35f + i * 4f, 0, (i - 2) * 12f), Vector3.one).Prism(4, 0.09f, 0f, h);
-            }
-            crystals.Spawn("CristalesLava", torso, crackMat, default, false);
-            // grietas: venas de lava sobre el pecho
-            Crack(torso, new Vector3(0, 0.25f, 0.05f), new Vector3(1.1f, 0.07f, 0.8f), 0f);
-            Crack(torso, new Vector3(-0.35f, 1.55f, 0.62f), new Vector3(0.05f, 0.7f, 0.05f), 25f);
-            Crack(torso, new Vector3(0.42f, 1.5f, 0.6f), new Vector3(0.05f, 0.55f, 0.05f), -30f);
-            Crack(torso, new Vector3(0.1f, 0.55f, 0.62f), new Vector3(0.75f, 0.05f, 0.05f), 8f);
-            Crack(torso, new Vector3(-0.75f, 1.1f, 0.4f), new Vector3(0.05f, 0.6f, 0.05f), -12f);
-            // grieta ancha del pecho, donde arde la operación
+            Chunk(torso, "Vientre", new Vector3(0, 0.35f, 0.12f), new Vector3(1.35f, 0.85f, 1.05f), 30, Belly, rock);
+            Chunk(torso, "Pecho", new Vector3(0, 1.02f, 0.12f), new Vector3(2.05f, 1.45f, 1.4f), 31, StoneA, rock);
+            Chunk(torso, "Joroba", new Vector3(0.1f, 1.7f, -0.4f), new Vector3(2.25f, 1.4f, 1.45f), 32, StoneC, rock);
+            Chunk(torso, "Joroba2", new Vector3(-0.55f, 1.9f, -0.25f), new Vector3(1.0f, 0.75f, 0.9f), 35, StoneA, rock);
+            // Hombrera derecha enorme (sostiene el brazo gigante) y una pequeña a la izquierda
+            Chunk(torso, "Hombrera_R", new Vector3(1.2f, 1.78f, 0.02f), new Vector3(1.3f, 1.0f, 1.2f), 34, StoneC, rock);
+            Chunk(torso, "Hombrera_R2", new Vector3(1.45f, 1.35f, 0.25f), new Vector3(0.8f, 0.7f, 0.8f), 36, StoneA, rock);
+            Chunk(torso, "Hombrera_L", new Vector3(-1.05f, 1.55f, 0.02f), new Vector3(0.75f, 0.6f, 0.75f), 33, StoneC, rock);
+
+            // Fisuras de energía: venas de lava entre las placas de piedra (pecho, costados, espalda)
+            Crack(torso, new Vector3(0, 0.66f, 0.72f), new Vector3(0.936f, 0.035f, 0.12f), 4f);
+            Crack(torso, new Vector3(-0.5f, 1.35f, 0.74f), new Vector3(0.035f, 0.585f, 0.12f), 28f);
+            Crack(torso, new Vector3(0.55f, 1.3f, 0.74f), new Vector3(0.035f, 0.507f, 0.12f), -32f);
+            Crack(torso, new Vector3(-0.85f, 0.95f, 0.45f), new Vector3(0.035f, 0.507f, 0.234f), -14f);
+            Crack(torso, new Vector3(0.9f, 1.1f, 0.4f), new Vector3(0.035f, 0.429f, 0.234f), 16f);
+            Crack(torso, new Vector3(0.1f, 1.95f, 0.15f), new Vector3(0.858f, 0.035f, 0.39f), -6f);
+            Crack(torso, new Vector3(0.95f, 1.6f, 0.35f), new Vector3(0.39f, 0.035f, 0.39f), 22f);
+            Crack(torso, new Vector3(-0.2f, 1.45f, -0.95f), new Vector3(0.78f, 0.035f, 0.12f), 10f);
+
+            // Grieta ancha del pecho, donde arde la operación (llave para vencerlo)
             var plate = new LowPoly().Paint(Color.white);
-            plate.At(new Vector3(0, 1.08f, 0.64f), Quaternion.Euler(-4, 0, 3), Vector3.one).Box(new Vector3(0.95f, 0.36f, 0.03f));
-            plate.At(new Vector3(-0.42f, 1.18f, 0.63f), Quaternion.Euler(-4, 0, 28), Vector3.one).Box(new Vector3(0.35f, 0.2f, 0.03f));
-            plate.At(new Vector3(0.4f, 0.98f, 0.63f), Quaternion.Euler(-4, 0, -22), Vector3.one).Box(new Vector3(0.32f, 0.18f, 0.03f));
+            plate.At(new Vector3(0, 1.08f, 0.8f), Quaternion.Euler(-4, 0, 3), Vector3.one).Box(new Vector3(0.95f, 0.36f, 0.03f));
+            plate.At(new Vector3(-0.42f, 1.18f, 0.79f), Quaternion.Euler(-4, 0, 28), Vector3.one).Box(new Vector3(0.35f, 0.2f, 0.03f));
+            plate.At(new Vector3(0.4f, 0.98f, 0.79f), Quaternion.Euler(-4, 0, -22), Vector3.one).Box(new Vector3(0.32f, 0.18f, 0.03f));
             chestMat = CineGlow.Make(new Color(0.9f, 0.18f, 0.04f), 0f, 1f, 0.25f);
             plate.Spawn("PlacaLava", torso, chestMat, default, false);
-            chestText = CineGlow.Number(operation, torso, new Vector3(0, 1.08f, 0.7f), new Color(5f, 2.6f, 0.9f), 0.36f, false);
+            chestText = CineGlow.Number(operation, torso, new Vector3(0, 1.08f, 0.86f), new Color(5f, 2.6f, 0.9f), 0.36f, false);
             chestText.transform.localRotation = Quaternion.Euler(-4, 180, 0);   // TextMesh se lee mirando a -Z: lo giramos hacia delante
             chestText.Pulse = 0.2f;
             chestText.FadeTo(1f, 10f);
 
-            // Cabeza pequeña y hundida entre los hombros, con ceja de piedra y musgo encima
-            head = LowPoly.Pivot("Cabeza", torso, new Vector3(0, 1.95f, 0.3f));
-            Chunk(head, "Craneo", new Vector3(0, 0.22f, 0), new Vector3(0.75f, 0.6f, 0.7f), 41, StoneC, rock);
-            Chunk(head, "Ceja", new Vector3(0, 0.36f, 0.25f), new Vector3(0.8f, 0.2f, 0.35f), 42, StoneB, rock);
-            Moss(head, new Vector3(0, 0.5f, -0.05f), new Vector3(0.6f, 0.18f, 0.55f), 84);
-            Chunk(head, "Mandibula", new Vector3(0, -0.02f, 0.18f), new Vector3(0.6f, 0.22f, 0.4f), 43, StoneB, rock);
-            foreach (float x in new[] { -0.17f, 0.17f })
+            // Cabeza hundida en la parte delantera del torso (sin cuello): cráneo, ceja pesada,
+            // ojos de magma y una boca dentada que brilla desde dentro.
+            head = LowPoly.Pivot("Cabeza", torso, new Vector3(0, 1.62f, 0.66f));
+            Chunk(head, "Craneo", new Vector3(0, 0.12f, -0.05f), new Vector3(0.9f, 0.7f, 0.75f), 41, StoneA, rock);
+            Chunk(head, "Ceja", new Vector3(0, 0.34f, 0.2f), new Vector3(0.95f, 0.24f, 0.4f), 42, StoneC, rock);
+            Chunk(head, "Pomulo_L", new Vector3(-0.33f, 0.05f, 0.22f), new Vector3(0.3f, 0.3f, 0.3f), 44, StoneB, rock);
+            Chunk(head, "Pomulo_R", new Vector3(0.33f, 0.05f, 0.22f), new Vector3(0.3f, 0.3f, 0.3f), 45, StoneB, rock);
+            Chunk(head, "Mandibula", new Vector3(0, -0.2f, 0.16f), new Vector3(0.72f, 0.26f, 0.45f), 43, StoneB, rock);
+            foreach (float x in new[] { -0.19f, 0.19f })
             {
                 var e = new LowPoly().Paint(Color.white);
-                e.At(new Vector3(x, 0.22f, 0.33f), Quaternion.identity, new Vector3(1.3f, 0.7f, 0.6f)).Rock(0.075f, 5, 0f, 0);
+                e.At(new Vector3(x, 0.2f, 0.36f), Quaternion.Euler(0, 0, x > 0 ? -12f : 12f), new Vector3(1.7f, 0.75f, 0.6f)).Rock(0.075f, 5, 0f, 0);
                 e.Spawn("Ojo", head, eyeMat, default, false);
             }
-
-            // Brazos largos con puños enormes (los arrastra al andar)
-            shoulderL = LowPoly.Pivot("Hombro_L", torso, new Vector3(-1.15f, 1.55f, 0));
-            shoulderR = LowPoly.Pivot("Hombro_R", torso, new Vector3(1.15f, 1.55f, 0));
-            foreach (var (sh, side) in new[] { (shoulderL, -1), (shoulderR, 1) })
+            // Boca: hueco encendido con dientes de piedra triangulares arriba y abajo
+            var mouth = new LowPoly().Paint(Color.white);
+            mouth.At(new Vector3(0, -0.07f, 0.36f)).Box(new Vector3(0.46f, 0.13f, 0.04f));
+            mouth.Spawn("Boca", head, eyeMat, default, false);
+            var teeth = new LowPoly().Paint(StoneC);
+            for (int i = 0; i < 5; i++)
             {
-                Chunk(sh, "Brazo", new Vector3(side * 0.12f, -0.45f, 0), new Vector3(0.6f, 0.9f, 0.6f), 50 + side, StoneA, rock);
-                var el = LowPoly.Pivot("Codo", sh, new Vector3(side * 0.15f, -0.95f, 0));
-                Chunk(el, "Antebrazo", new Vector3(0, -0.4f, 0.05f), new Vector3(0.62f, 0.85f, 0.62f), 60 + side, StoneB, rock);
-                var fist = LowPoly.Pivot("Puno", el, new Vector3(0, -1.0f, 0.1f));
-                Chunk(fist, "PunoMesh", Vector3.zero, new Vector3(0.95f, 0.85f, 0.95f), 70 + side, StoneC, rock);
-                Moss(fist, new Vector3(0, 0.38f, -0.1f), new Vector3(0.6f, 0.15f, 0.5f), 85 + side);
-                Crack(el, new Vector3(0, 0.0f, 0.05f), new Vector3(0.45f, 0.05f, 0.45f), 0f);
-                if (side < 0) { elbowL = el; fistL = fist; } else { elbowR = el; fistR = fist; }
+                float x = -0.18f + i * 0.09f;
+                teeth.At(new Vector3(x, 0.0f, 0.385f), Quaternion.Euler(180, 0, 0), Vector3.one).Prism(3, 0.035f, 0f, 0.07f);
+                teeth.At(new Vector3(x + 0.045f, -0.14f, 0.385f), Quaternion.identity, Vector3.one).Prism(3, 0.032f, 0f, 0.06f);
             }
+            teeth.Spawn("Dientes", head, rock, default, false);
+            Crack(head, new Vector3(-0.28f, 0.33f, 0.3f), new Vector3(0.035f, 0.12f, 0.06f), 30f);
+
+            // Brazo DERECHO gigante: segmentos de roca apilados con lava entre ellos y un puño enorme.
+            shoulderR = LowPoly.Pivot("Hombro_R", torso, new Vector3(1.32f, 1.62f, 0.05f));
+            Chunk(shoulderR, "Brazo1", new Vector3(0.12f, -0.22f, 0), new Vector3(0.95f, 0.75f, 0.9f), 51, StoneA, rock);
+            Chunk(shoulderR, "Brazo2", new Vector3(0.18f, -0.68f, 0.04f), new Vector3(0.9f, 0.7f, 0.88f), 52, StoneC, rock);
+            Crack(shoulderR, new Vector3(0.15f, -0.45f, 0.05f), new Vector3(0.585f, 0.035f, 0.585f), 6f);
+            elbowR = LowPoly.Pivot("Codo", shoulderR, new Vector3(0.2f, -1.02f, 0));
+            Crack(elbowR, new Vector3(0, 0.02f, 0.02f), new Vector3(0.624f, 0.035f, 0.624f), -4f);
+            Chunk(elbowR, "Antebrazo1", new Vector3(0, -0.28f, 0.05f), new Vector3(1.0f, 0.7f, 0.95f), 61, StoneA, rock);
+            Chunk(elbowR, "Antebrazo2", new Vector3(0.04f, -0.72f, 0.08f), new Vector3(1.08f, 0.72f, 1.02f), 62, StoneC, rock);
+            Crack(elbowR, new Vector3(0.02f, -0.5f, 0.07f), new Vector3(0.702f, 0.035f, 0.702f), 8f);
+            fistR = LowPoly.Pivot("Puno", elbowR, new Vector3(0.05f, -1.15f, 0.14f));
+            Chunk(fistR, "PunoMesh", new Vector3(0, -0.05f, 0), new Vector3(1.35f, 1.0f, 1.25f), 71, StoneC, rock);
+            Chunk(fistR, "Nudillos", new Vector3(0, -0.12f, 0.42f), new Vector3(1.15f, 0.55f, 0.55f), 72, StoneA, rock);
+            Chunk(fistR, "PunoLado", new Vector3(-0.5f, 0.05f, 0.1f), new Vector3(0.55f, 0.75f, 0.8f), 73, StoneB, rock);
+            Crack(fistR, new Vector3(0, 0.2f, 0.2f), new Vector3(0.78f, 0.035f, 0.468f), -10f);
+            Crack(fistR, new Vector3(0.2f, -0.15f, 0.56f), new Vector3(0.035f, 0.312f, 0.1f), 20f);
+            Crack(fistR, new Vector3(-0.22f, -0.12f, 0.56f), new Vector3(0.035f, 0.273f, 0.1f), -15f);
+
+            // Brazo IZQUIERDO normal (más delgado), con un puño pequeño
+            shoulderL = LowPoly.Pivot("Hombro_L", torso, new Vector3(-1.12f, 1.5f, 0));
+            Chunk(shoulderL, "Brazo", new Vector3(-0.08f, -0.42f, 0), new Vector3(0.55f, 0.85f, 0.55f), 49, StoneB, rock);
+            elbowL = LowPoly.Pivot("Codo", shoulderL, new Vector3(-0.1f, -0.9f, 0));
+            Chunk(elbowL, "Antebrazo", new Vector3(0, -0.38f, 0.05f), new Vector3(0.55f, 0.8f, 0.55f), 59, StoneA, rock);
+            Crack(elbowL, new Vector3(0, 0.0f, 0.05f), new Vector3(0.312f, 0.035f, 0.312f), 0f);
+            fistL = LowPoly.Pivot("Puno", elbowL, new Vector3(0, -0.92f, 0.08f));
+            Chunk(fistL, "PunoMesh", Vector3.zero, new Vector3(0.72f, 0.66f, 0.72f), 69, StoneC, rock);
 
             BuildWheel(rock);
 
             // Luz de lava (ilumina el suelo y las flores) y brasas que suben
-            var lg = new GameObject("LuzLava"); lg.transform.SetParent(torso, false); lg.transform.localPosition = new Vector3(0, 1.0f, 1.2f);
+            var lg = new GameObject("LuzLava"); lg.transform.SetParent(torso, false); lg.transform.localPosition = new Vector3(0, 1.1f, 1.4f);
             coreLight = lg.AddComponent<Light>(); coreLight.type = LightType.Point; coreLight.color = new Color(1f, 0.45f, 0.12f); coreLight.range = 6f; coreLight.intensity = 2.2f;
             coreLight.shadows = LightShadows.None;
             embers = CineGlow.Motes("Brasas", torso, new Vector3(0, 1.0f, 0), new Color(3f, 0.9f, 0.2f), 9f, 0.12f, 0.6f, 2.2f, 0.9f, -0.12f);
@@ -180,8 +214,6 @@ namespace MageHero
             for (int i = 0; i < 6; i++)
                 cr.At(Vector3.zero, Quaternion.Euler(i * 30f, 0, 0), Vector3.one).Box(new Vector3(1.5f, 0.06f, R * 1.9f));
             cr.Spawn("GrietasRueda", spin, crackMat, default, false);
-            Moss(spin, new Vector3(0.6f, 0.9f, 0.4f), new Vector3(0.6f, 0.3f, 0.7f), 121);
-            Moss(spin, new Vector3(-0.6f, -0.7f, -0.6f), new Vector3(0.6f, 0.3f, 0.7f), 122);
             wheel.gameObject.SetActive(false);
         }
 
@@ -195,37 +227,6 @@ namespace MageHero
             go.transform.SetParent(parent, false);
             go.GetComponent<MeshFilter>().sharedMesh = lp.Build(name);
             go.GetComponent<MeshRenderer>().sharedMaterial = mat;
-        }
-
-        void Moss(Transform parent, Vector3 pos, Vector3 scale, int seed)
-        {
-            var lp = new LowPoly().Paint(seed % 2 == 0 ? MossA : MossB);
-            lp.At(pos, Quaternion.Euler(0, seed * 29, 0), scale).Rock(0.5f, seed, 0.25f);
-            var go = new GameObject("Musgo", typeof(MeshFilter), typeof(MeshRenderer));
-            go.transform.SetParent(parent, false);
-            go.GetComponent<MeshFilter>().sharedMesh = lp.Build("Musgo");
-            go.GetComponent<MeshRenderer>().sharedMaterial = IntroSet.VertexToon();
-        }
-
-        /// Hojas de otoño caídas sobre el gólem (lleva tiempo dormido en el bosque).
-        void Leaves(Transform parent, Vector3 center, float radius, int count, int seed)
-        {
-            var rng = new System.Random(seed);
-            var lp = new LowPoly();
-            Color[] cols = { LeafA, LeafB, LeafC };
-            for (int i = 0; i < count; i++)
-            {
-                lp.Paint(cols[rng.Next(cols.Length)]);
-                float a = (float)rng.NextDouble() * 6.28f, d = (float)rng.NextDouble() * radius;
-                Vector3 p = center + new Vector3(Mathf.Cos(a) * d, (float)rng.NextDouble() * 0.08f, Mathf.Sin(a) * d * 0.6f);
-                lp.At(p, Quaternion.Euler((float)rng.NextDouble() * 30f - 15f, a * 57f, (float)rng.NextDouble() * 30f - 15f), Vector3.one * 0.16f);
-                Vector3 q0 = new Vector3(0, 0, -0.6f), q1 = new Vector3(0.35f, 0, 0), q2 = new Vector3(0, 0, 0.6f), q3 = new Vector3(-0.35f, 0, 0);
-                lp.Tri(q0, q2, q1); lp.Tri(q0, q3, q2); lp.Tri(q0, q1, q2); lp.Tri(q0, q2, q3);
-            }
-            var go = new GameObject("Hojas", typeof(MeshFilter), typeof(MeshRenderer));
-            go.transform.SetParent(parent, false);
-            go.GetComponent<MeshFilter>().sharedMesh = lp.Build("Hojas");
-            var r = go.GetComponent<MeshRenderer>(); r.sharedMaterial = IntroSet.VertexToon(); r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }
 
         void Crack(Transform parent, Vector3 pos, Vector3 size, float roll)
@@ -295,6 +296,7 @@ namespace MageHero
             yield return new WaitForSeconds(down);
             CameraShake3D.Shake(0.35f, 0.28f);
             DustPuff(kneeR.position + transform.forward * 0.3f + Vector3.down * 0.7f, 26);
+            GolemAudio.Play("golem_golpe", kneeR.position, 0.8f, 1.1f);
             stompTarget = 0f;
             Busy = false;
         }
@@ -311,6 +313,7 @@ namespace MageHero
             hit.y = GroundY(hit, transform.position.y);
             CameraShake3D.Shake(0.4f, 0.3f);
             DustPuff(hit, 30);
+            GolemAudio.Play("golem_golpe", hit, 1f);
             onImpact?.Invoke(hit);
             yield return new WaitForSeconds(0.45f);
             armsUpTarget = 0f; hunchTarget = 0f; crouchTarget = 0f;
@@ -324,6 +327,9 @@ namespace MageHero
             Busy = true;
             roarTarget = 1f; cracksTarget = 2.2f;
             embers.Emit(30);
+            Vector3 mouth = head != null ? head.position : transform.position + Vector3.up * 3f;
+            GolemAudio.Play("golem_rugido", mouth, 1f, Mathf.Lerp(1.05f, 0.9f, Mathf.InverseLerp(0.8f, 1.6f, seconds)));
+            MageAudio.PlayBossRoar(mouth, 0.62f);                              // capa de rugido: más grave = más pesado
             CameraShake3D.Shake(0.12f, seconds * 0.8f);
             yield return new WaitForSeconds(seconds);
             roarTarget = 0f; cracksTarget = 1f;
@@ -333,6 +339,104 @@ namespace MageHero
         /// Tambaleo al recibir un golpe fuerte (o al romperse su coraza).
         public void Stagger(float k = 1f) { stagger = Mathf.Max(stagger, k); }
 
+        // ------------------------------------------------------------------ golpes y daño
+        /// Impacto en un punto del cuerpo: destello, retroceso, esquirlas de roca que saltan y polvo.
+        /// strength ≈ 0.5 (golpe leve) … 1.5 (golpe muy fuerte).
+        public void Hit(Vector3 point, float strength = 1f)
+        {
+            if (body == null) return;
+            strength = Mathf.Clamp(strength, 0.3f, 2f);
+            flash = 1f;
+            hitKick = Mathf.Max(hitKick, 0.6f * strength);
+            Stagger(0.25f * strength);
+            Vector3 outDir = point - (torso != null ? torso.position : transform.position); outDir.y = 0f;
+            outDir = outDir.sqrMagnitude > 0.01f ? outDir.normalized : transform.forward;
+            int n = Mathf.RoundToInt(Mathf.Lerp(3f, 9f, strength / 1.5f));
+            for (int i = 0; i < n; i++)
+            {
+                Color c = i % 3 == 0 ? StoneC : (i % 2 == 0 ? StoneA : StoneB);
+                Vector3 v = outDir * UnityEngine.Random.Range(1.5f, 4f) + Vector3.up * UnityEngine.Random.Range(2f, 4.5f) + UnityEngine.Random.insideUnitSphere * 1.5f;
+                Debris.Chip(point + UnityEngine.Random.insideUnitSphere * 0.2f, v, UnityEngine.Random.Range(0.05f, 0.15f), c, UnityEngine.Random.Range(2.5f, 4f));
+            }
+            DustPuff(point, Mathf.RoundToInt(8 * strength));
+            if (embers != null) embers.Emit(Mathf.RoundToInt(6 * strength));
+            GolemAudio.Play("golem_impacto", point, Mathf.Lerp(0.6f, 1f, strength / 1.5f), 1.05f, 0.08f);
+        }
+
+        /// Impacto en un punto del pecho (de frente), para quien no sabe dónde golpeó el hechizo.
+        public void Hit(float strength = 1f)
+        {
+            if (torso == null) return;
+            Hit(torso.TransformPoint(new Vector3(UnityEngine.Random.Range(-0.7f, 0.7f), UnityEngine.Random.Range(0.6f, 1.6f), 0.8f)), strength);
+        }
+
+        /// Daño acumulado (0 = intacto, 1 = a punto de caer). Las venas de lava se abren poco a poco y, al pasar
+        /// ciertos umbrales, se desprende un trozo de roca dejando una herida de lava. Si se cura, las venas se cierran
+        /// (los trozos perdidos no vuelven: quedan las cicatrices).
+        public void SetDamage(float k)
+        {
+            damageTarget = Mathf.Clamp01(k);
+            while (brokenChunks < BreakOrder.Length && damageTarget >= BreakOrder[brokenChunks].at)
+                BreakChunk(BreakOrder[brokenChunks++].name);
+        }
+
+        void BreakChunk(string chunkName)
+        {
+            var t = FindDeep(transform, chunkName);
+            if (t == null) return;
+            var parent = t.parent;
+            Vector3 center = Recenter(t.gameObject);
+            // herida: grietas de lava cruzadas donde estaba la roca
+            var w = new LowPoly().Paint(Color.white);
+            for (int i = 0; i < 3; i++) w.At(center, Quaternion.Euler(UnityEngine.Random.Range(0, 180f), i * 60f, UnityEngine.Random.Range(0, 180f)), Vector3.one).Box(new Vector3(0.5f, 0.05f, 0.05f));
+            w.Spawn("Herida", parent, crackMat, default, false);
+            // la roca se suelta, sale despedida y queda en el suelo
+            Vector3 outDir = t.position - transform.position; outDir.y = 0f; outDir = outDir.sqrMagnitude > 0.01f ? outDir.normalized : -transform.forward;
+            t.SetParent(null, true);
+            var r = t.GetComponent<MeshRenderer>(); if (r != null) r.sharedMaterial = DetailMaterials.SharedStone();
+            Debris.Spawn(t.gameObject, outDir * 2.5f + Vector3.up * 3.5f, UnityEngine.Random.insideUnitSphere * 200f, 7f, 0.35f);
+            DustPuff(t.position, 22);
+            if (embers != null) embers.Emit(20);
+            GolemAudio.Play("golem_quiebre", t.position, 1f);
+            CineGlow.Burst(t.position, new Color(3f, 1.1f, 0.25f), 26, 2.4f, 0.1f, 0.8f, 0.5f);
+            CameraShake3D.Shake(0.15f, 0.25f);
+            Stagger(0.8f);
+        }
+
+        /// Mueve el pivote de una pieza al centro de su malla (las rocas se construyen desplazadas desde la articulación).
+        static Vector3 Recenter(GameObject go)
+        {
+            var mf = go.GetComponent<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) return go.transform.localPosition;
+            var mesh = mf.sharedMesh;
+            Vector3 c = mesh.bounds.center;
+            var v = mesh.vertices;
+            for (int i = 0; i < v.Length; i++) v[i] -= c;
+            mesh.vertices = v; mesh.RecalculateBounds();
+            go.transform.localPosition += go.transform.localRotation * Vector3.Scale(c, go.transform.localScale);
+            return go.transform.localPosition;
+        }
+
+        static Transform FindDeep(Transform t, string n)
+        {
+            if (t.name == n) return t;
+            foreach (Transform c in t) { var r = FindDeep(c, n); if (r != null) return r; }
+            return null;
+        }
+
+        /// Pisada: polvo bajo el pie, algún guijarro y un leve temblor si la cámara está cerca.
+        void FootDown(Transform knee)
+        {
+            Vector3 foot = knee.TransformPoint(new Vector3(0, -0.8f, 0.16f));
+            if (RuntimeMaterials.Ground(foot + Vector3.up, out Vector3 g)) foot.y = Mathf.Max(g.y, foot.y - 0.5f);
+            DustPuff(foot, 6);
+            GolemAudio.Play("golem_paso", foot, 0.85f);
+            if (UnityEngine.Random.value < 0.5f)
+                Debris.Chip(foot + Vector3.up * 0.1f, UnityEngine.Random.insideUnitSphere * 1.2f + Vector3.up * 1.8f, UnityEngine.Random.Range(0.04f, 0.08f), StoneB, 2f);
+            var cam = Camera.main;
+            if (cam != null && (cam.transform.position - foot).sqrMagnitude < 14f * 14f) CameraShake3D.Shake(0.035f, 0.1f);
+        }
+
         /// Se enrolla en forma de rueda (true) o vuelve a ponerse de pie (false). Una nube de polvo tapa el cambio.
         public IEnumerator Curl(bool toWheel)
         {
@@ -340,6 +444,7 @@ namespace MageHero
             if (toWheel)
             {
                 crouchTarget = 1f; hunchTarget = 1f; armsUpTarget = -0.2f;
+                GolemAudio.Play("golem_arrancar", transform.position + Vector3.up, 1f, 0.85f);   // rocas que se pliegan
                 yield return new WaitForSeconds(0.45f);
                 DustPuff(transform.position + Vector3.up * 1f, 40);
                 body.gameObject.SetActive(false);
@@ -349,6 +454,7 @@ namespace MageHero
             else
             {
                 DustPuff(transform.position + Vector3.up * 1f, 40);
+                GolemAudio.Play("golem_arrancar", transform.position + Vector3.up, 0.9f, 1f);
                 wheel.gameObject.SetActive(false);
                 body.gameObject.SetActive(true);
                 curl = curlTarget = 0f;
@@ -382,31 +488,28 @@ namespace MageHero
             enabled = false;
             CameraShake3D.Shake(0.3f, 0.6f);
             DustPuff(transform.position + Vector3.up * 0.5f, 50);
+            GolemAudio.Play("golem_derrumbe", transform.position + Vector3.up * 1.5f, 1f);
             if (embers != null) embers.Stop();
             CineGlow.SetIntensity(eyeMat, 0f); CineGlow.SetIntensity(crackMat, 0.1f); CineGlow.SetIntensity(chestMat, 0f);
             if (chestText != null) chestText.gameObject.SetActive(false);
             if (coreLight != null) coreLight.enabled = false;
-            var rocks = GetComponentsInChildren<MeshRenderer>();
-            var vel = new Vector3[rocks.Length];
-            for (int i = 0; i < rocks.Length; i++)
+            // Cada roca se suelta con su propio peso: cae, rebota, queda un rato en el suelo y se hunde.
+            // Las piezas de lava (ojos, grietas, placa) ya apagadas desaparecen entre el polvo.
+            var stone = DetailMaterials.SharedStone();
+            foreach (var r in GetComponentsInChildren<MeshRenderer>())
             {
-                rocks[i].transform.SetParent(null, true);
-                vel[i] = (rocks[i].transform.position - transform.position - Vector3.up * 1.5f).normalized * UnityEngine.Random.Range(1f, 3f) + Vector3.up * UnityEngine.Random.Range(1f, 3f);
+                if (r.sharedMaterial != rockMat) { r.enabled = false; continue; }
+                var go = r.gameObject;
+                Recenter(go);
+                go.transform.SetParent(null, true);
+                r.sharedMaterial = stone;
+                Vector3 v = (go.transform.position - transform.position - Vector3.up * 1.5f).normalized * UnityEngine.Random.Range(1f, 3.2f)
+                          + Vector3.up * UnityEngine.Random.Range(1f, 3.5f);
+                Debris.Spawn(go, v, UnityEngine.Random.insideUnitSphere * 160f, UnityEngine.Random.Range(3.5f, 5.5f), 0.35f);
             }
-            float ground = GroundY(transform.position, transform.position.y);
-            for (float t = 0; t < 2.4f; t += Time.deltaTime)
-            {
-                for (int i = 0; i < rocks.Length; i++)
-                {
-                    var r = rocks[i]; if (r == null) continue;
-                    Vector3 p = r.transform.position;
-                    if (p.y > ground + 0.3f) { vel[i] += Physics.gravity * Time.deltaTime; p += vel[i] * Time.deltaTime; r.transform.Rotate(vel[i] * 40f * Time.deltaTime); }
-                    if (t > 1.5f) p.y -= Time.deltaTime * 0.7f;
-                    r.transform.position = p;
-                }
-                yield return null;
-            }
-            foreach (var r in rocks) if (r != null) Destroy(r.gameObject);
+            for (float t = 0; t < 0.6f; t += Time.deltaTime) yield return null;
+            DustPuff(transform.position + Vector3.up * 0.3f, 40);
+            for (float t = 0; t < 1.8f; t += Time.deltaTime) yield return null;
         }
 
         static float GroundY(Vector3 p, float fallback) => RuntimeMaterials.Ground(p, out Vector3 hit) ? hit.y : fallback;
@@ -432,11 +535,25 @@ namespace MageHero
             hold = Damp(hold, holdTarget, 6f, dt);
             heal = Damp(heal, healTarget, 3f, dt);
             stagger = Mathf.MoveTowards(stagger, 0f, dt * 1.6f);
+            flash = Mathf.MoveTowards(flash, 0f, dt * 7f);
+            hitKick = Damp(hitKick, 0f, 6f, dt);
+            damage = Mathf.MoveTowards(damage, damageTarget, dt * 0.8f);
 
             if (curl > 0.5f) { UpdateGlow(); return; }      // en forma de rueda la anima SpinWheel
 
             float s = Mathf.Sin(phase), c = Mathf.Cos(phase);
             float w = walk;
+
+            // ---- Pisadas: el pie izquierdo apoya cuando cos(fase) pasa de + a −, el derecho al revés.
+            if (w > 0.35f && prevStepCos != 0f && Mathf.Sign(c) != Mathf.Sign(prevStepCos)) FootDown(c < 0f ? kneeL : kneeR);
+            prevStepCos = c;
+            // de vez en cuando se le desprende un guijarro del cuerpo al andar
+            if (w > 0.5f && idleT > nextPebble)
+            {
+                nextPebble = idleT + UnityEngine.Random.Range(1.2f, 2.8f);
+                Vector3 from = torso.TransformPoint(new Vector3(UnityEngine.Random.Range(-1f, 1f), UnityEngine.Random.Range(0.4f, 1.9f), UnityEngine.Random.Range(-0.6f, 0.6f)));
+                Debris.Chip(from, UnityEngine.Random.insideUnitSphere * 0.6f, UnityEngine.Random.Range(0.04f, 0.08f), StoneA, 2.5f);
+            }
             // Idle: cambio de peso lento de una pierna a otra (solo parado).
             float idleShift = Mathf.Sin(idleT * 0.45f) * (1f - w);
 
@@ -457,7 +574,7 @@ namespace MageHero
 
             // ---- Torso: inclinado al andar, respira, gira contra la cadera (contrapeso).
             float breathe = Mathf.Sin(idleT * 1.3f) * 1.2f;
-            float torsoPitch = 10f * hunch + 7f * w - 18f * roar + breathe - armsUp * 8f + crouch * 30f - hold * 6f - heal * 12f - stagger * 10f;
+            float torsoPitch = BaseHunch * (1f - crouch) + 10f * hunch + 7f * w - 18f * roar + breathe - armsUp * 8f + crouch * 30f - hold * 6f - heal * 12f - stagger * 10f - hitKick * 12f;
             torso.localRotation = Quaternion.Euler(torsoPitch, -s * 9f * w, c * 3f * w + idleShift * 1.5f);
             torso.localScale = new Vector3(1f, 1f + Mathf.Sin(idleT * 1.3f) * 0.012f, 1f);
 
@@ -483,7 +600,7 @@ namespace MageHero
                 wantPitch = Mathf.Clamp(-Mathf.Atan2(local.y, new Vector2(local.x, local.z).magnitude) * Mathf.Rad2Deg, -25f, 30f);
             }
             headYaw = Mathf.MoveTowardsAngle(headYaw, wantYaw, dt * 55f);
-            headPitch = Mathf.MoveTowards(headPitch, wantPitch - roar * 25f - heal * 15f, dt * 60f);
+            headPitch = Mathf.MoveTowards(headPitch, wantPitch - roar * 25f - heal * 15f - BaseHunch * 0.8f * (1f - crouch), dt * 60f);   // mira al frente pese a ir encorvado
             head.localRotation = Quaternion.Euler(headPitch, headYaw, Mathf.Sin(stagger * 17f) * 10f * stagger);
 
             UpdateGlow();
@@ -496,6 +613,13 @@ namespace MageHero
             CineGlow.SetIntensity(eyeMat, eyes * (0.9f + 0.1f * Mathf.Sin(Time.time * 9f)));
             CineGlow.SetIntensity(crackMat, k * flick);
             CineGlow.SetIntensity(chestMat, k * 0.9f * flick);
+            if (rockMat != null)
+            {
+                rockMat.SetFloat(FlashId, flash);
+                rockMat.SetFloat(DamageId, damage);                              // las venas de lava se abren con el daño
+                rockMat.SetFloat(VeinGlowId, Mathf.Max(0.15f, k) * flick);
+                rockMat.SetColor(VeinColorId, Color.Lerp(Lava, new Color(0.8f, 3f, 0.6f), Mathf.Clamp01(heal)));
+            }
             if (coreLight != null)
             {
                 coreLight.intensity = 1.6f * k * flick + eyes * 0.4f;
@@ -518,6 +642,7 @@ namespace MageHero
             if (eyeMat != null) Destroy(eyeMat);
             if (crackMat != null) Destroy(crackMat);
             if (chestMat != null) Destroy(chestMat);
+            if (rockMat != null) Destroy(rockMat);
         }
     }
 }

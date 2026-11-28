@@ -8,14 +8,13 @@ using UnityEngine.UI;
 
 namespace MageHero
 {
-    /// Menú principal con estilo "cartoon": fondo de pizarra con manchas, cinta naranja con el título,
-    /// botones redondeados con brillo y botones circulares. Tres pantallas:
-    ///  1) Portada: Jugar · Controles · Salir.
-    ///  2) Escenarios: una tarjeta por nivel con imagen de referencia, nombre, tema y botón ¡Jugar!.
-    ///  3) Controles (ventana emergente).
-    /// Se construye en tiempo de ejecución sobre el Canvas de MenuController (sustituye al menú antiguo).
+    /// Menú principal de CLIPPER con el estilo "Low Poly Game GUI" (Diseños/MenuPrincipal/image.png):
+    /// de fondo el bosque de otoño en 3D (MenuBackdrop), panel claro con la cinta azul "MENÚ PRINCIPAL" y botones de colores con icono.
+    ///  1) Portada: Continuar (si hay partida guardada) · Jugar · Configuración · Controles · Ver historia · Salir.
+    ///  2) Escenarios: una tarjeta por nivel con imagen, nombre, tema y botón ¡Jugar!.
+    ///  3) Configuración y Controles (ventanas emergentes).
+    /// Se construye en tiempo de ejecución sobre el Canvas de MenuController (1280×720 de referencia).
     /// Imágenes de los escenarios: Resources/MenuThumbs/<id>.png
-    /// (se regeneran con Tools > Mage Hero > Menu > Capturar imágenes de escenarios).
     public class StyledMainMenu : MonoBehaviour
     {
         public const string ThumbFolder = "MenuThumbs";
@@ -24,6 +23,7 @@ namespace MageHero
 
         MenuController menu;
         GameObject mainPage, levelsPage, controlsPanel, loadingPanel;
+        SettingsPanel settings;
         Text loadingTitle, loadingInfo;
         RectTransform loadingFill;
         bool loading;
@@ -55,20 +55,21 @@ namespace MageHero
         void Update()
         {
             var kb = Keyboard.current;
-            if (loading || kb == null || !kb.escapeKey.wasPressedThisFrame) return;
+            if (loading || kb == null || !kb.escapeKey.wasPressedThisFrame || SettingsPanel.BlocksEscape) return;
             if (controlsPanel.activeSelf) controlsPanel.SetActive(false);
             else if (levelsPage.activeSelf) ShowMain();
         }
 
         void ShowMain() { mainPage.SetActive(true); levelsPage.SetActive(false); controlsPanel.SetActive(false); }
         void ShowLevels() { mainPage.SetActive(false); levelsPage.SetActive(true); controlsPanel.SetActive(false); }
-        void ShowControls() { controlsPanel.SetActive(true); }
+        void ShowControls() { controlsPanel.SetActive(true); controlsPanel.transform.SetAsLastSibling(); }
+        void ShowSettings() => settings.Show();
+        void Continue() { if (SaveGame.HasSave) LoadScene(SaveGame.BeginContinue()); }
         void Load(string scene) => LoadScene(scene);
         void Quit() { if (menu != null) menu.Quit(); }
 
         // ------------------------------------------------------------------ Carga del escenario
-        /// Carga el nivel mostrando una pantalla de "Cargando..." con barra de progreso
-        /// (los niveles tardan unos segundos y sin aviso parecía que el botón no funcionaba).
+        /// Carga el nivel mostrando una pantalla de "Cargando..." con barra de progreso.
         public void LoadScene(string scene)
         {
             if (loading) return;
@@ -113,7 +114,7 @@ namespace MageHero
         {
             loadingPanel.SetActive(true);
             loadingPanel.transform.SetAsLastSibling();
-            loadingTitle.text = title;
+            loadingTitle.text = title.ToUpperInvariant();
             loadingInfo.text = info;
             SetProgress(progress);
         }
@@ -129,40 +130,51 @@ namespace MageHero
         // ------------------------------------------------------------------ Construcción
         void Build()
         {
+            // Fondo: el bosque de otoño en 3D (escena MenuBackdrop, cámara sobrevolando). Mientras carga, o si la
+            // escena no está en el build, se ve el fondo facetado de siempre, que luego se desvanece.
             var bg = MenuStyle.Rect("Background", transform).gameObject.AddComponent<RawImage>();
-            bg.texture = MenuStyle.Background();
+            bg.texture = GameGui.Background();
             bg.raycastTarget = false;
             MenuStyle.Stretch(bg.rectTransform);
+            // velo oscuro suave sobre el bosque para que el menú y el título se lean bien
+            var veil = MenuStyle.Rect("Velo", transform).gameObject.AddComponent<Image>();
+            veil.color = new Color(0.02f, 0.06f, 0.08f, 0.22f);
+            veil.raycastTarget = false;
+            MenuStyle.Stretch(veil.rectTransform);
+            MenuBackdrop.Load(this, ok => { if (ok && bg != null) StartCoroutine(FadeOut(bg, 0.8f)); });
 
             BuildMainPage();
             BuildLevelsPage();
             BuildControlsPanel();
+            settings = SettingsPanel.Create(transform, true, RebuildMain);
             BuildLoadingPanel();
+        }
+
+        /// Tras borrar datos o cambiar ajustes: rehace la portada (Continuar aparece o desaparece).
+        void RebuildMain()
+        {
+            bool wasActive = mainPage != null && mainPage.activeSelf;
+            if (mainPage != null) Destroy(mainPage);
+            BuildMainPage();
+            mainPage.transform.SetSiblingIndex(2);                     // sobre el fondo y el velo, detrás de las ventanas emergentes
+            mainPage.SetActive(wasActive || !levelsPage.activeSelf);
         }
 
         void BuildLoadingPanel()
         {
-            var overlay = MenuStyle.Image("LoadingPanel", transform, null, new Color(0.06f, 0.08f, 0.11f, 0.92f));
-            overlay.raycastTarget = true;                         // bloquea más clics mientras carga
-            MenuStyle.Stretch(overlay.rectTransform);
+            var overlay = GameGui.Dim(transform, "LoadingPanel", 0.92f);
             loadingPanel = overlay.gameObject;
-
-            var r = MenuStyle.Image("Ribbon", overlay.transform, MenuStyle.Ribbon(MenuStyle.Orange, MenuStyle.OrangeDark), Color.white);
-            MenuStyle.Place(r.rectTransform, new Vector2(.5f, .5f), new Vector2(0, 90), new Vector2(620, 120));
-            loadingTitle = MenuStyle.Label(r.transform, "Cargando...", 50, Color.white, MenuStyle.OrangeDark);
-            MenuStyle.Stretch(loadingTitle.rectTransform);
-            loadingTitle.rectTransform.offsetMin = new Vector2(40, 6); loadingTitle.rectTransform.offsetMax = new Vector2(-40, 0);
-
-            loadingInfo = MenuStyle.Label(overlay.transform, "", 28, Color.white, new Color(0, 0, 0, .6f));
-            MenuStyle.Place(loadingInfo.rectTransform, new Vector2(.5f, .5f), new Vector2(0, 0), new Vector2(900, 40));
-
-            var bar = MenuStyle.Image("Bar", overlay.transform, MenuStyle.RoundedRect(new Color(0, 0, 0, .5f), new Color(0, 0, 0, .5f), Color.white, 16, 3), Color.white);
-            MenuStyle.Place(bar.rectTransform, new Vector2(.5f, .5f), new Vector2(0, -70), new Vector2(520, 36));
-            var fill = MenuStyle.Image("Fill", bar.transform, MenuStyle.RoundedRect(Color.Lerp(MenuStyle.Green, Color.white, .2f), MenuStyle.GreenDark, MenuStyle.GreenDark, 12, 2), Color.white);
+            var rib = GameGui.Ribbon(overlay.transform, "Cargando...", new Vector2(560, 80), GameGui.Blue, 40);
+            MenuStyle.Place(rib.rectTransform, new Vector2(.5f, .5f), new Vector2(0, 90), new Vector2(560, 80));
+            loadingTitle = rib.GetComponentInChildren<Text>();
+            loadingInfo = GameGui.Fit(GameGui.Text(overlay.transform, "Info", "", 26, Color.white), 14, 26);
+            MenuStyle.Place(loadingInfo.rectTransform, new Vector2(.5f, .5f), new Vector2(0, 4), new Vector2(900, 70));
+            var bar = GameGui.Img("Barra", overlay.transform, GameGui.Inset(), Color.white);
+            MenuStyle.Place(bar.rectTransform, new Vector2(.5f, .5f), new Vector2(0, -70), new Vector2(520, 34));
+            var fill = GameGui.Img("Relleno", bar.transform, GameGui.ButtonSprite(), GameGui.Green);
             loadingFill = fill.rectTransform;
             loadingFill.anchorMin = Vector2.zero; loadingFill.anchorMax = new Vector2(0.02f, 1f);
             loadingFill.offsetMin = new Vector2(5, 5); loadingFill.offsetMax = new Vector2(-5, -5);
-
             loadingPanel.SetActive(false);
         }
 
@@ -170,30 +182,67 @@ namespace MageHero
         {
             mainPage = MenuStyle.Rect("MainPage", transform).gameObject;
             MenuStyle.Stretch((RectTransform)mainPage.transform);
+            var page = mainPage.transform;
 
-            Ribbon(mainPage.transform, "Mago de los Números", new Vector2(0, -105), new Vector2(940, 150), 64);
-            var sub = MenuStyle.Label(mainPage.transform, "¡Aprende matemáticas con magia!", 24, new Color(1f, 0.93f, 0.6f), new Color(0, 0, 0, .6f));
-            MenuStyle.Place(sub.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -200), new Vector2(800, 36));
+            // --- Panel del menú (izquierda): su alto se ajusta al número de botones
+            bool hasSave = SaveGame.HasSave;
+            int count = 4 + (hasSave ? 1 : 0);
+#if !UNITY_WEBGL || UNITY_EDITOR
+            count++;
+#endif
+            float panelH = 96f + count * 72f + 14f;
+            var panel = GameGui.Panel(page, "PanelMenu", new Vector2(430, panelH));
+            MenuStyle.Place(panel.rectTransform, new Vector2(.5f, .5f), new Vector2(-330, -16), new Vector2(430, panelH));
+            var rib = GameGui.Ribbon(panel.transform, "Menú principal", new Vector2(480, 72), GameGui.Blue, 32);
+            MenuStyle.Place(rib.rectTransform, new Vector2(.5f, 1f), new Vector2(0, 14), new Vector2(480, 72));
 
-            var play = MenuStyle.GlossyButton("PlayButton", mainPage.transform, "Jugar", MenuStyle.Red, 46, ShowLevels);
-            MenuStyle.Place((RectTransform)play.transform, new Vector2(.5f, .5f), new Vector2(0, 10), new Vector2(340, 92));
-            var controls = MenuStyle.GlossyButton("ControlsButton", mainPage.transform, "Controles", MenuStyle.Green, 40, ShowControls);
-            MenuStyle.Place((RectTransform)controls.transform, new Vector2(.5f, .5f), new Vector2(0, -100), new Vector2(340, 84));
-            var quit = MenuStyle.GlossyButton("QuitButton", mainPage.transform, "Salir", MenuStyle.Green, 40, Quit);
-            MenuStyle.Place((RectTransform)quit.transform, new Vector2(.5f, .5f), new Vector2(0, -205), new Vector2(340, 84));
-
-            var help = MenuStyle.RoundButton("HelpButton", mainPage.transform, "?", MenuStyle.Purple, 92, ShowControls);
-            MenuStyle.Place((RectTransform)help.transform, new Vector2(0f, 0f), new Vector2(90, 80), new Vector2(92, 92));
-            var levels = MenuStyle.RoundButton("LevelsButton", mainPage.transform, "►", MenuStyle.Blue, 72, ShowLevels);
-            MenuStyle.Place((RectTransform)levels.transform, new Vector2(0f, 0f), new Vector2(190, 72), new Vector2(72, 72));
-
-            // Vuelve a reproducir la cinemática de apertura y entra al Nivel 1.
-            var story = MenuStyle.GlossyButton("StoryButton", mainPage.transform, "Ver historia", MenuStyle.Purple, 28, () =>
+            float y = -92f; const float step = 72f;
+            var bsz = new Vector2(350, 60);
+            void Add(string text, Color color, GameGui.Icon icon, System.Action onClick)
             {
-                IntroCinematic.ForceNext = true;
-                LoadScene(IntroCinematic.LevelScene);
-            });
-            MenuStyle.Place((RectTransform)story.transform, new Vector2(1f, 0f), new Vector2(-150, 72), new Vector2(240, 66));
+                var b = GameGui.Button(panel.transform, "Btn_" + text, text, color, icon, onClick, 26, bsz);
+                MenuStyle.Place((RectTransform)b.transform, new Vector2(.5f, 1f), new Vector2(0, y), bsz);
+                y -= step;
+            }
+            if (hasSave) Add("CONTINUAR", GameGui.Yellow, GameGui.Icon.Play, Continue);
+            Add(hasSave ? "ESCENARIOS" : "JUGAR", hasSave ? GameGui.Green : GameGui.Yellow, hasSave ? GameGui.Icon.Levels : GameGui.Icon.Play, ShowLevels);
+            Add("CONFIGURACIÓN", GameGui.Purple, GameGui.Icon.Settings, ShowSettings);
+            Add("CONTROLES", GameGui.Orange, GameGui.Icon.Keys, ShowControls);
+            Add("VER HISTORIA", GameGui.Blue, GameGui.Icon.Star, () => { IntroCinematic.ForceNext = true; LoadScene(IntroCinematic.LevelScene); });
+#if !UNITY_WEBGL || UNITY_EDITOR
+            Add("SALIR", GameGui.Red, GameGui.Icon.Close, Quit);           // en el navegador no se puede cerrar el juego
+#endif
+
+            // --- Título y lema (derecha)
+            var t1 = GameGui.Text(page, "Titulo", "CLIPPER", 128, GameGui.Hex(0x8fe9ff));
+            Glow(t1);
+            MenuStyle.Place(t1.rectTransform, new Vector2(.5f, .5f), new Vector2(250, 130), new Vector2(700, 150));
+
+            var pill = GameGui.Img("Lema", page, GameGui.ButtonSprite(), GameGui.Blue);
+            MenuStyle.Place(pill.rectTransform, new Vector2(.5f, .5f), new Vector2(250, 20), new Vector2(520, 60));
+            var pt = GameGui.Fit(GameGui.Text(pill.transform, "Texto", "¡APRENDIENDO MATEMÁTICAS CON MAGIA!", 22, Color.white), 12, 22);
+            MenuStyle.Stretch(pt.rectTransform); pt.rectTransform.offsetMin = new Vector2(16, 6); pt.rectTransform.offsetMax = new Vector2(-16, -2);
+
+            var defs = LevelMenu.Entries();
+            var hint = GameGui.Text(page, "Atajos", "Teclas 1–" + defs.Length + ": abrir un escenario   ·   Esc: volver", 16, new Color(0.75f, 0.9f, 0.92f, 0.75f), TextAnchor.MiddleCenter, false);
+            MenuStyle.Place(hint.rectTransform, new Vector2(.5f, 0f), new Vector2(0, 22), new Vector2(900, 24));
+        }
+
+        static IEnumerator FadeOut(Graphic g, float seconds)
+        {
+            for (float t = 0; t < 1f && g != null; t += Time.unscaledDeltaTime / seconds)
+            {
+                var c = g.color; c.a = 1f - t; g.color = c;
+                yield return null;
+            }
+            if (g != null) g.gameObject.SetActive(false);
+        }
+
+        /// Título con contorno oscuro y sombra violeta (aire del texto "LOW POLY" del diseño).
+        static void Glow(Text t)
+        {
+            var o = t.gameObject.AddComponent<Outline>(); o.effectColor = new Color(0.04f, 0.13f, 0.16f, 0.9f); o.effectDistance = new Vector2(3, -3);
+            var s = t.GetComponent<Shadow>(); if (s != null && !(s is Outline)) { s.effectColor = new Color(0.45f, 0.3f, 0.9f, 0.55f); s.effectDistance = new Vector2(0, -7); }
         }
 
         void BuildLevelsPage()
@@ -201,11 +250,12 @@ namespace MageHero
             levelsPage = MenuStyle.Rect("LevelsPage", transform).gameObject;
             MenuStyle.Stretch((RectTransform)levelsPage.transform);
 
-            Ribbon(levelsPage.transform, "Elige un escenario", new Vector2(0, -78), new Vector2(760, 120), 50);
+            var rib = GameGui.Ribbon(levelsPage.transform, "Elige un escenario", new Vector2(600, 76), GameGui.Blue, 34);
+            MenuStyle.Place(rib.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -56), new Vector2(600, 76));
             var defs = LevelMenu.Entries();
             string keys = defs.Length <= 1 ? "1" : string.Join(", ", System.Linq.Enumerable.Range(1, defs.Length - 1)) + " o " + defs.Length;
-            var hint = MenuStyle.Label(levelsPage.transform, "Haz clic en una tarjeta o pulsa " + keys, 20, new Color(1, 1, 1, .85f), new Color(0, 0, 0, .6f), false);
-            MenuStyle.Place(hint.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -150), new Vector2(800, 30));
+            var hint = GameGui.Text(levelsPage.transform, "Pista", "Haz clic en una tarjeta o pulsa " + keys, 18, new Color(0.8f, 0.93f, 0.95f, 0.9f), TextAnchor.MiddleCenter, false);
+            MenuStyle.Place(hint.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -116), new Vector2(800, 28));
 
             // Con más de 3 escenarios las tarjetas se encogen para caber en el ancho de referencia (1280).
             const float step = 395f, maxRow = 1240f;
@@ -213,27 +263,23 @@ namespace MageHero
             for (int i = 0; i < defs.Length; i++)
             {
                 float x = (i - (defs.Length - 1) / 2f) * step * scale;
-                // La escala va en un contenedor: ButtonBounce anima la escala de la propia tarjeta.
                 var slot = MenuStyle.Rect("Slot_" + defs[i].id, levelsPage.transform);
-                MenuStyle.Place(slot, new Vector2(.5f, .5f), new Vector2(x, -55 + (1f - scale) * 60f), new Vector2(365, 480));
+                MenuStyle.Place(slot, new Vector2(.5f, .5f), new Vector2(x, -40 + (1f - scale) * 60f), new Vector2(365, 480));
                 slot.localScale = new Vector3(scale, scale, 1f);
-                LevelCard(slot, defs[i], i, Vector2.zero);
+                LevelCard(slot, defs[i], i);
             }
 
-            var back = MenuStyle.GlossyButton("BackButton", levelsPage.transform, "< Volver", MenuStyle.Green, 28, ShowMain);
-            MenuStyle.Place((RectTransform)back.transform, new Vector2(0f, 0f), new Vector2(125, 50), new Vector2(200, 62));
+            var back = GameGui.Button(levelsPage.transform, "Volver", "VOLVER", GameGui.Green, GameGui.Icon.Back, ShowMain, 22, new Vector2(210, 56));
+            MenuStyle.Place((RectTransform)back.transform, new Vector2(0f, 0f), new Vector2(135, 46), new Vector2(210, 56));
         }
 
-        RectTransform LevelCard(Transform parent, LevelDef d, int index, Vector2 pos)
+        void LevelCard(Transform parent, LevelDef d, int index)
         {
-            Color accent; if (!ColorUtility.TryParseHtmlString(d.accent, out accent)) accent = MenuStyle.Orange;
+            Color accent; if (!ColorUtility.TryParseHtmlString(d.accent, out accent)) accent = GameGui.Orange;
             string scene = LevelMenu.SceneName(d);
 
-            var card = MenuStyle.Image("Card_" + d.id, parent,
-                MenuStyle.RoundedRect(new Color(0.16f, 0.21f, 0.28f, 0.95f), new Color(0.09f, 0.12f, 0.17f, 0.95f), accent, 24, 5), Color.white);
-            MenuStyle.Place(card.rectTransform, new Vector2(.5f, .5f), pos, new Vector2(365, 480));
-            var shadow = card.gameObject.AddComponent<Shadow>(); shadow.effectColor = new Color(0, 0, 0, .55f); shadow.effectDistance = new Vector2(0, -8);
-            // Toda la tarjeta se puede pulsar para entrar al escenario.
+            var card = GameGui.Panel(parent, "Card_" + d.id, new Vector2(365, 480));
+            MenuStyle.Stretch(card.rectTransform);
             card.raycastTarget = true;
             var cardBtn = card.gameObject.AddComponent<Button>();
             cardBtn.transition = Selectable.Transition.None;
@@ -241,59 +287,51 @@ namespace MageHero
             cardBtn.onClick.AddListener(() => Load(scene));
             card.gameObject.AddComponent<ButtonBounce>().hoverScale = 1.03f;
 
-            // Imagen de referencia (recortada con esquinas redondeadas mediante Mask).
-            var frame = MenuStyle.Image("ThumbFrame", card.transform, MenuStyle.RoundedRect(Color.white, Color.white, Color.white, 18, 0), Color.white);
-            MenuStyle.Place(frame.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -122), new Vector2(325, 200));
+            // Imagen del escenario con marco hundido.
+            var frame = GameGui.Img("Marco", card.transform, GameGui.Inset(), Color.white);
+            MenuStyle.Place(frame.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -122), new Vector2(325, 196));
             frame.raycastTarget = true;
             frame.gameObject.AddComponent<Mask>().showMaskGraphic = true;
             var thumb = MenuStyle.Rect("Thumb", frame.transform).gameObject.AddComponent<RawImage>();
-            MenuStyle.Stretch(thumb.rectTransform);
+            MenuStyle.Stretch(thumb.rectTransform, 4f);
             thumb.raycastTarget = false;
-            SetThumb(thumb, d, 325f / 200f);
-            var thumbBtn = frame.gameObject.AddComponent<Button>();
-            thumbBtn.transition = Selectable.Transition.None;
-            thumbBtn.onClick.AddListener(() => Load(scene));
-            frame.gameObject.AddComponent<ButtonBounce>().hoverScale = 1.04f;
+            SetThumb(thumb, d, 317f / 188f);
 
             // Insignia "NIVEL n" sobre la imagen.
-            var badge = MenuStyle.Image("Badge", card.transform, MenuStyle.RoundedRect(Color.Lerp(accent, Color.white, .15f), MenuStyle.Darker(accent, .85f), MenuStyle.Darker(accent), 16, 3), Color.white);
-            MenuStyle.Place(badge.rectTransform, new Vector2(0f, 1f), new Vector2(82, -30), new Vector2(130, 38));
-            var bl = MenuStyle.Label(badge.transform, $"{d.lv.ToUpperInvariant()}  ·  {index + 1}", 17, Color.white, MenuStyle.Darker(accent));
-            MenuStyle.Stretch(bl.rectTransform);
+            var badge = GameGui.Img("Insignia", card.transform, GameGui.ButtonSprite(), accent);
+            MenuStyle.Place(badge.rectTransform, new Vector2(0f, 1f), new Vector2(86, -26), new Vector2(140, 36));
+            var bl = GameGui.Fit(GameGui.Text(badge.transform, "Texto", $"{d.lv.ToUpperInvariant()} · {index + 1}", 17, Color.white), 10, 17);
+            MenuStyle.Stretch(bl.rectTransform); bl.rectTransform.offsetMin = new Vector2(6, 6); bl.rectTransform.offsetMax = new Vector2(-6, -2);
 
-            var name = MenuStyle.Label(card.transform, d.name, 28, Color.white, new Color(0, 0, 0, .7f));
-            MenuStyle.Place(name.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -250), new Vector2(345, 36));
-            var sub = UIText.Make(card.transform, "Sub", d.sub, 16, new Color(1, 1, 1, .8f));
-            MenuStyle.Place(sub.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -280), new Vector2(345, 24));
-            var tags = UIText.Make(card.transform, "Tags", d.tags != null ? string.Join("  ·  ", d.tags) : "", 14, new Color(1, 1, 1, .6f));
-            tags.horizontalOverflow = HorizontalWrapMode.Wrap;
-            MenuStyle.Place(tags.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -312), new Vector2(330, 40));
+            var name = GameGui.Fit(GameGui.Text(card.transform, "Nombre", d.name, 28, GameGui.Ink, TextAnchor.MiddleCenter, false), 16, 28);
+            MenuStyle.Place(name.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -246), new Vector2(330, 36));
+            var sub = GameGui.Fit(GameGui.Text(card.transform, "Sub", d.sub, 16, GameGui.InkSoft, TextAnchor.MiddleCenter, false), 11, 16);
+            MenuStyle.Place(sub.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -276), new Vector2(330, 24));
+            var tags = GameGui.Fit(GameGui.Text(card.transform, "Tags", d.tags != null ? string.Join("  ·  ", d.tags) : "", 14, GameGui.InkSoft, TextAnchor.MiddleCenter, false), 10, 14);
+            MenuStyle.Place(tags.rectTransform, new Vector2(.5f, 1f), new Vector2(0, -308), new Vector2(320, 40));
 
-            var topic = MenuStyle.Image("Topic", card.transform, MenuStyle.RoundedRect(new Color(0, 0, 0, .35f), new Color(0, 0, 0, .35f), accent, 16, 2), Color.white);
-            MenuStyle.Place(topic.rectTransform, new Vector2(.5f, 0f), new Vector2(0, 112), new Vector2(290, 36));
-            var tl = UIText.Make(topic.transform, "Label", "Tema: " + d.topic, 18, accent);
-            tl.fontStyle = FontStyle.Bold;
-            MenuStyle.Stretch(tl.rectTransform);
+            var topic = GameGui.Img("Tema", card.transform, GameGui.Inset(), Color.white);
+            MenuStyle.Place(topic.rectTransform, new Vector2(.5f, 0f), new Vector2(0, 118), new Vector2(300, 38));
+            var tl = GameGui.Fit(GameGui.Text(topic.transform, "Texto", "Tema: " + d.topic, 17, Color.Lerp(accent, Color.white, 0.35f)), 10, 17);
+            MenuStyle.Stretch(tl.rectTransform, 4f);
 
-            var play = MenuStyle.GlossyButton("PlayButton", card.transform, "¡Jugar!", accent, 34, () => Load(scene));
-            MenuStyle.Place((RectTransform)play.transform, new Vector2(.5f, 0f), new Vector2(0, 50), new Vector2(240, 70));
+            var play = GameGui.Button(card.transform, "Jugar", "¡JUGAR!", accent, GameGui.Icon.Play, () => Load(scene), 26, new Vector2(250, 62));
+            MenuStyle.Place((RectTransform)play.transform, new Vector2(.5f, 0f), new Vector2(0, 54), new Vector2(250, 62));
 
-            // Tarjeta bloqueada: velo oscuro con candado y el requisito para abrirla.
+            // Tarjeta bloqueada: velo oscuro con el requisito para abrirla.
             if (!LevelProgress.IsUnlocked(scene))
             {
-                var veil = MenuStyle.Image("Bloqueado", card.transform, MenuStyle.RoundedRect(new Color(0.02f, 0.03f, 0.06f, 0.78f), new Color(0.02f, 0.03f, 0.06f, 0.78f), new Color(0, 0, 0, 0.8f), 24, 0), Color.white);
+                var veil = GameGui.Img("Bloqueado", card.transform, GameGui.PanelDark(), new Color(1, 1, 1, 0.94f));
                 MenuStyle.Stretch(veil.rectTransform);
                 veil.raycastTarget = true;
                 var lockBtn = veil.gameObject.AddComponent<Button>();
                 lockBtn.transition = Selectable.Transition.None;
                 lockBtn.onClick.AddListener(() => Load(scene));
-                var lockIcon = MenuStyle.Label(veil.transform, "BLOQUEADO", 34, new Color(1f, 0.8f, 0.3f), new Color(0, 0, 0, .8f));
+                var lockIcon = GameGui.Text(veil.transform, "Candado", "BLOQUEADO", 34, GameGui.Yellow);
                 MenuStyle.Place(lockIcon.rectTransform, new Vector2(.5f, .5f), new Vector2(0, 30), new Vector2(330, 50));
-                var req = UIText.Make(veil.transform, "Requisito", $"Termina «{LevelProgress.RequiredLevelName(scene)}»\npara desbloquear este nivel", 18, Color.white);
-                req.horizontalOverflow = HorizontalWrapMode.Wrap;
+                var req = GameGui.Fit(GameGui.Text(veil.transform, "Requisito", $"Termina «{LevelProgress.RequiredLevelName(scene)}»\npara desbloquear este nivel", 18, Color.white, TextAnchor.MiddleCenter, false), 12, 18);
                 MenuStyle.Place(req.rectTransform, new Vector2(.5f, .5f), new Vector2(0, -30), new Vector2(320, 60));
             }
-            return card.rectTransform;
         }
 
         /// Pone la imagen del escenario recortándola para llenar el hueco sin deformarse.
@@ -302,7 +340,6 @@ namespace MageHero
             var tex = Resources.Load<Texture2D>(ThumbFolder + "/" + d.id);
             if (tex == null)
             {
-                // Sin imagen: degradado con el color del cielo y del terreno del nivel.
                 tex = new Texture2D(1, 2) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
                 tex.SetPixels(new[] { MenuStyle.Hex(d.pal != null ? d.pal.path : 0x8fb84e), MenuStyle.Hex(d.sky) });
                 tex.Apply();
@@ -319,46 +356,34 @@ namespace MageHero
 
         void BuildControlsPanel()
         {
-            var overlay = MenuStyle.Image("ControlsPanel", transform, null, new Color(0, 0, 0, .65f));
-            overlay.raycastTarget = true;
-            MenuStyle.Stretch(overlay.rectTransform);
+            var overlay = GameGui.Dim(transform, "ControlsPanel", 0.62f);
             controlsPanel = overlay.gameObject;
-
-            var box = MenuStyle.Image("Box", overlay.transform,
-                MenuStyle.RoundedRect(new Color(0.18f, 0.23f, 0.30f), new Color(0.10f, 0.13f, 0.18f), MenuStyle.Orange, 26, 5), Color.white);
-            MenuStyle.Place(box.rectTransform, new Vector2(.5f, .5f), new Vector2(0, -20), new Vector2(680, 500));
-            Ribbon(box.transform, "Controles", new Vector2(0, 5), new Vector2(460, 100), 44, new Vector2(.5f, 1f));
+            var box = GameGui.Panel(overlay.transform, "Caja", new Vector2(700, 540));
+            MenuStyle.Place(box.rectTransform, new Vector2(.5f, .5f), new Vector2(0, -16), new Vector2(700, 540));
+            var rib = GameGui.Ribbon(box.transform, "Controles", new Vector2(420, 66));
+            MenuStyle.Place(rib.rectTransform, new Vector2(.5f, 1f), new Vector2(0, 8), new Vector2(420, 66));
 
             string[,] rows =
             {
                 { "W A S D / Flechas", "Caminar" }, { "Shift", "Correr" }, { "Espacio", "Saltar" },
-                { "Clic izquierdo / Enter", "Lanzar hechizo" }, { "Clic derecho + arrastrar", "Girar la cámara" },
-                { "Q / E · Z / X · Rueda", "Girar · Zoom" }, { "F · H", "Interactuar · Ver pista" }, { "M · Esc", "Mapa · Pausa" },
+                { "Clic izquierdo / Enter", "Lanzar hechizo" }, { "Clic derecho + ratón", "Girar la cámara" },
+                { "Q / E  ·  Z / X  ·  Rueda", "Girar · Acercar" }, { "F  ·  H", "Interactuar · Ver pista" }, { "M  ·  Esc", "Mapa · Pausa" },
             };
             for (int i = 0; i < rows.GetLength(0); i++)
             {
-                float y = -95 - i * 38;
-                var k = UIText.Make(box.transform, "Key", rows[i, 0], 20, new Color(1f, .8f, .3f), TextAnchor.MiddleRight);
-                k.fontStyle = FontStyle.Bold;
-                MenuStyle.Place(k.rectTransform, new Vector2(.5f, 1f), new Vector2(-150, y), new Vector2(300, 32));
-                var v = UIText.Make(box.transform, "Action", rows[i, 1], 20, Color.white, TextAnchor.MiddleLeft);
-                MenuStyle.Place(v.rectTransform, new Vector2(.5f, 1f), new Vector2(170, y), new Vector2(300, 32));
+                float y = -82 - i * 46;
+                // tecla: cajita oscura con el texto centrado · acción: texto centrado en su columna
+                var cap = GameGui.Img("Tecla", box.transform, GameGui.Inset(), Color.white);
+                MenuStyle.Place(cap.rectTransform, new Vector2(.5f, 1f), new Vector2(-140, y), new Vector2(300, 38));
+                var k = GameGui.Fit(GameGui.Text(cap.transform, "Texto", rows[i, 0], 18, GameGui.Yellow), 11, 18);
+                MenuStyle.Stretch(k.rectTransform, 4f);
+                var v = GameGui.Fit(GameGui.Text(box.transform, "Accion", rows[i, 1], 20, GameGui.Ink, TextAnchor.MiddleCenter, false), 12, 20);
+                MenuStyle.Place(v.rectTransform, new Vector2(.5f, 1f), new Vector2(170, y), new Vector2(280, 38));
             }
 
-            var close = MenuStyle.GlossyButton("CloseButton", box.transform, "Cerrar", MenuStyle.Red, 30, () => controlsPanel.SetActive(false));
-            MenuStyle.Place((RectTransform)close.transform, new Vector2(.5f, 0f), new Vector2(0, 50), new Vector2(220, 66));
-        }
-
-        static void Ribbon(Transform parent, string text, Vector2 pos, Vector2 size, int fontSize, Vector2? anchor = null)
-        {
-            var r = MenuStyle.Image("Ribbon", parent, MenuStyle.Ribbon(MenuStyle.Orange, MenuStyle.OrangeDark), Color.white);
-            MenuStyle.Place(r.rectTransform, anchor ?? new Vector2(.5f, 1f), pos, size);
-            r.rectTransform.localRotation = Quaternion.identity;   // recta: estilo low poly
-            var sh = r.gameObject.AddComponent<Shadow>(); sh.effectColor = new Color(0, 0, 0, .45f); sh.effectDistance = new Vector2(0, -8);
-            var t = MenuStyle.Label(r.transform, text, fontSize, Color.white, MenuStyle.OrangeDark);
-            MenuStyle.Stretch(t.rectTransform);
-            t.rectTransform.offsetMin = new Vector2(40, 6);
-            t.rectTransform.offsetMax = new Vector2(-40, 0);
+            var close = GameGui.Button(box.transform, "Cerrar", "CERRAR", GameGui.Red, GameGui.Icon.Close, () => controlsPanel.SetActive(false), 22, new Vector2(230, 56));
+            MenuStyle.Place((RectTransform)close.transform, new Vector2(.5f, 0f), new Vector2(0, 46), new Vector2(230, 56));
+            controlsPanel.SetActive(false);
         }
     }
 }

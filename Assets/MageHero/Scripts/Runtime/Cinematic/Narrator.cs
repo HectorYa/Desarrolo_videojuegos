@@ -5,7 +5,7 @@ using UnityEngine;
 
 namespace MageHero
 {
-    /// Voz en off (español de México) de la cinemática de apertura y del tutorial con el Maestro Athan.
+    /// Voz en off femenina (español de México, es-MX-DaliaNeural) de la cinemática de apertura y del tutorial con el Maestro Athan.
     /// Cada línea tiene un id y un texto. El audio se busca en Resources/Audio/Narracion/{id} (.wav, .mp3 u .ogg);
     /// si todavía no existe, la línea se muestra solo como subtítulo durante el tiempo estimado de lectura.
     /// Los audios se generan desde el menú de Unity: MageHero ▸ Narración ▸ Generar voces (es-MX).
@@ -16,19 +16,10 @@ namespace MageHero
         /// Guion completo de la voz en off. El generador de voces del editor lee esta misma tabla.
         public static readonly (string id, string text)[] Lines =
         {
-            // --- Cinemática · Escena 1
-            ("intro_01", "En la Arboleda de Otoño, un joven aprendiz entrenaba cada mañana junto al espíritu de su maestro, Athan."),
-            ("intro_02", "Athan le enseñó que los números son la magia que mantiene al mundo en equilibrio."),
-            ("intro_03", "Siete más tres, diez. Cada respuesta correcta encendía una chispa de luz."),
-            // --- Escena 2
-            ("intro_04", "Pero aquella mañana, el cielo del sur se rasgó."),
-            ("intro_05", "Dentro del meteorito despertó el Gran Cero. Donde pasa, los números se apagan y la tierra cae en el caos."),
-            // --- Escena 3
-            ("intro_06", "Entonces, el bosque guardó silencio."),
-            ("intro_07", "El primero de sus sirvientes, un Gólem de Piedra, llevaba una operación ardiendo en el pecho: la llave para vencerlo."),
-            // --- Escena 4
-            ("intro_08", "Athan le entregó al joven su última chispa de luz."),
-            ("intro_09", "Había llegado la hora de despertar el báculo… y convertirse en el Mago de los Números."),
+            // --- Cinemática corta (≈ 15 s)
+            ("intro_01", "En la Arboleda de Otoño, un joven mago entrenaba en calma…"),
+            ("intro_02", "…hasta que el cielo se rasgó y cayó el Gran Cero."),
+            ("intro_03", "Era hora de tomar el báculo y convertirse en el Mago de los Números."),
 
             // --- Tutorial (habla el Maestro Athan)
             ("tut_00", "Tranquilo, aprendiz. Antes de enfrentarlo, recuerda lo que hemos practicado."),
@@ -127,7 +118,7 @@ namespace MageHero
                 float seconds = clip != null ? clip.length : ReadingTime(text);
                 ShowSubtitle(text, seconds + 0.6f);
                 Speaking?.Invoke(true);
-                if (clip != null) { source.clip = clip; source.Play(); }
+                if (clip != null) { source.volume = GameSettings.Voice; source.clip = clip; source.Play(); }
                 // tiempo real: la voz no se ralentiza con la cámara lenta de la cinemática
                 for (float t = 0; t < seconds; t += Time.unscaledDeltaTime) yield return null;
                 Speaking?.Invoke(false);

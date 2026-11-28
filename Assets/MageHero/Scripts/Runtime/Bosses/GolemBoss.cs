@@ -34,6 +34,7 @@ namespace MageHero
         float nextThreshold;
         int phaseShown = 1, solved;
         bool woke;
+        AudioSource ambience;
         Color rockColor = new Color(0.55f, 0.52f, 0.48f);
 
         // ------------------------------------------------------------------ construcción
@@ -61,6 +62,17 @@ namespace MageHero
             if (ai != null) ai.enabled = false;               // el gólem se mueve solo (pasos sincronizados, sin patinar)
             hs.destroyOnDeath = false;                         // primero se desmorona, luego desaparece
             hs.Died += OnDied;
+            // cada golpe salta en esquirlas y la roca se va resquebrajando según la vida que le queda
+            hs.Damaged += (_, amount) =>
+            {
+                if (dead || g == null) return;
+                Vector3 toPlayer = player != null ? Flat(player.position - transform.position).normalized : transform.forward;
+                Vector3 at = (g.Chest != null ? g.Chest.position : transform.position) + Vector3.up * Random.Range(0.6f, 1.8f)
+                           + toPlayer * 1.1f + Vector3.Cross(Vector3.up, toPlayer) * Random.Range(-0.8f, 0.8f);
+                g.Hit(at, Mathf.Clamp(amount / 12f, 0.5f, 1.5f));
+                g.SetDamage(1f - hs.Normalized);
+            };
+            hs.Changed += _ => { if (!dead && g != null) g.SetDamage(1f - hs.Normalized); };
             nextThreshold = 1f - mathStep;
             nextRock = Time.time + 2.5f; nextSpike = Time.time + 4f; nextRoll = Time.time + 6f;
             g.SetEyes(0f, true); g.SetCracks(0.5f); g.SetHunch(0.9f); g.ShowOperation(false);
@@ -105,6 +117,8 @@ namespace MageHero
         /// Despierta: se yergue, se sacude las hojas y ruge.
         IEnumerator WakeUp()
         {
+            // ambiente destructivo mientras dura el combate: retumbar grave y derrumbes lejanos
+            if (ambience == null) ambience = GolemAudio.Loop("golem_ambiente", null, 0.55f);
             g.SetHunch(0f); g.SetEyes(1f); g.SetCracks(1f);
             yield return new WaitForSeconds(0.6f);
             yield return g.Roar(1.3f);
@@ -151,6 +165,7 @@ namespace MageHero
             Vector3 ground = transform.position + transform.forward * 1.3f;
             if (RuntimeMaterials.Ground(ground, out var gh)) ground = gh;
             g.DustPuff(ground, 18);
+            GolemAudio.Play("golem_arrancar", ground, 1f);                     // arranca la roca del suelo
             var rock = MakeRock(0.62f);
             float t = 0;
             // sube la roca entre los puños
@@ -173,6 +188,7 @@ namespace MageHero
             if (RuntimeMaterials.Ground(aim, out var ag)) aim = ag;
             if (slowMoRock) launched?.Invoke(rock);
             else ArcProjectile.Launch(rock, from, aim, flight, 3f + dist * 0.15f, rockDamage, 2.1f, new Color(0.75f, 0.5f, 0.25f));
+            GolemAudio.Play("golem_lanzar", from, 1f, slowMoRock ? 0.7f : 1f);   // silbido de la roca cortando el aire
             CameraShake3D.Shake(0.08f, 0.2f);
             yield return new WaitForSeconds(0.35f);
             g.SetArmsUp(0f);
@@ -186,7 +202,7 @@ namespace MageHero
             lp.Rock(radius, Random.Range(0, 9999), 0.25f);
             lp.Paint(new Color(0.42f, 0.55f, 0.25f));                   // un poco de musgo y tierra pegados
             lp.At(new Vector3(0, radius * 0.7f, 0), Quaternion.identity, new Vector3(1f, 0.4f, 1f)).Rock(radius * 0.6f, Random.Range(0, 9999), 0.3f, 0);
-            var go = lp.Spawn("Roca", null, IntroSet.VertexToon());
+            var go = lp.Spawn("Roca", null, DetailMaterials.SharedStone());
             var crack = new LowPoly().Paint(Color.white);
             crack.At(Vector3.zero, Random.rotation, Vector3.one).Box(new Vector3(radius * 2.05f, 0.05f, 0.05f));
             crack.At(Vector3.zero, Random.rotation, Vector3.one).Box(new Vector3(0.05f, radius * 2.05f, 0.05f));
@@ -270,11 +286,12 @@ namespace MageHero
             }
             lp.Paint(new Color(0.4f, 0.3f, 0.2f));
             lp.At(Vector3.zero, Quaternion.identity, new Vector3(1.4f, 0.35f, 1.4f) * scale).Rock(0.55f, rng.Next(999), 0.3f, 0);
-            var spike = lp.Spawn("PilarDeTierra", null, IntroSet.VertexToon(), at);
+            var spike = lp.Spawn("PilarDeTierra", null, DetailMaterials.SharedStone(), at);
             Destroy(w);
             Destroy(warnMat);
             // brota
             spike.transform.localScale = new Vector3(1f, 0.05f, 1f);
+            GolemAudio.Play("golem_pilares", at, 0.75f, Random.Range(0.9f, 1.1f), 0.11f);
             HitFX.Explosion(at + Vector3.up * 0.2f, 0.8f * scale, new Color(0.55f, 0.42f, 0.28f));
             bool hit = false;
             for (float t = 0; t < 1f; t += Time.deltaTime / 0.12f)
@@ -313,10 +330,12 @@ namespace MageHero
             bool hitPlayer = false;
             int obstacles = GameLayers.Exists(GameLayers.Obstacles) ? GameLayers.Mask(GameLayers.Obstacles) : 0;
             var dust = CineGlow.Motes("PolvoRueda", transform, Vector3.up * 0.2f, new Color(0.4f, 0.34f, 0.26f), 50f, 0.9f, 1.2f, 1.1f, 0.6f, -0.02f);
+            var rollSound = GolemAudio.Loop("golem_rueda", transform, 1f);      // tierra que rueda y se amontona
             while (travelled < len && t < 3f)
             {
                 t += Time.deltaTime;
                 speed = Mathf.MoveTowards(speed, 13f, 18f * Time.deltaTime);
+                if (rollSound != null) rollSound.pitch = 0.75f + speed / 13f * 0.45f;
                 // persigue un poco (giro limitado): se puede esquivar apartándose a un lado
                 Vector3 want = Flat(player.position - transform.position).normalized;
                 if (want.sqrMagnitude > 0.01f) dir = Vector3.RotateTowards(dir, want, 22f * Mathf.Deg2Rad * Time.deltaTime, 0f).normalized;
@@ -324,6 +343,7 @@ namespace MageHero
                 {
                     CameraShake3D.Shake(0.4f, 0.4f);
                     HitFX.Explosion(transform.position + dir * 1.5f + Vector3.up, 1.4f, new Color(0.7f, 0.5f, 0.3f));
+                    GolemAudio.Play("golem_golpe", transform.position + dir * 1.5f, 1f, 0.9f);
                     break;                                                    // choca contra un árbol o una roca
                 }
                 Vector3 p = transform.position + dir * speed * Time.deltaTime;
@@ -342,6 +362,7 @@ namespace MageHero
                 yield return null;
             }
             dust.Stop(); Destroy(dust.gameObject, 2f);
+            GolemAudio.StopLoop(rollSound, 0.5f);
             yield return g.Curl(false);
             // aturdido: se tambalea con los ojos parpadeando
             g.Stagger(1f); g.SetEyes(0.35f);
@@ -534,6 +555,8 @@ namespace MageHero
             if (dead) return;
             dead = true;
             StopAllCoroutines();
+            GolemAudio.StopLoop(ambience, 3f);
+            ambience = null;
             if (Time.timeScale < 1f && !PauseMenu.IsOpen) Time.timeScale = 1f;
             BossFocus.EndAll();
             var col = GetComponent<Collider>(); if (col != null) col.enabled = false;

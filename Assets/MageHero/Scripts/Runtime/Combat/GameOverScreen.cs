@@ -62,13 +62,13 @@ namespace MageHero
         void OpenQuiz()
         {
             equation = ArithmeticEquation.Random();
-            equationText.text = equation.text;
+            equationText.text = UIText.SafeSymbols(equation.text);
             feedbackText.text = "Elige la respuesta correcta (clic o teclas 1-4). Solo tienes un intento.";
             feedbackText.color = Color.white;
             for (int i = 0; i < 4; i++)
             {
-                answerLabels[i].text = $"{i + 1})  {equation.options[i]}";
-                answerButtons[i].image.color = AnswerBg;
+                answerLabels[i].text = equation.options[i].ToString();     // la tecla ya va en el bloque de color
+                answerButtons[i].image.color = UIManager.AnswerColor(i);
                 answerButtons[i].interactable = true;
             }
             choicePage.SetActive(false);
@@ -167,10 +167,10 @@ namespace MageHero
             for (int i = 0; i < 4; i++)
             {
                 int idx = i;
-                var b = MenuStyle.TintButton("Answer" + (i + 1), quizPage.transform, "", AnswerBg, 30, () => Answer(idx), LowPolyUI.Cream);
+                var b = GameGui.Button(quizPage.transform, "Answer" + (i + 1), "", UIManager.AnswerColor(i), GameGui.Icon.Number1 + i, () => Answer(idx), 28, new Vector2(270, 62));
                 MenuStyle.Place((RectTransform)b.transform, new Vector2(.5f, 1f), new Vector2(i % 2 == 0 ? -145 : 145, i < 2 ? -236 : -310), new Vector2(270, 62));
                 answerButtons[i] = b;
-                answerLabels[i] = b.GetComponentInChildren<Text>();
+                answerLabels[i] = GameGui.Label(b);                         // el texto (no el número del bloque)
             }
             feedbackText = MenuStyle.Label(quizPage.transform, "", 19, Color.white, new Color(0, 0, 0, .6f), false);
             feedbackText.horizontalOverflow = HorizontalWrapMode.Wrap;

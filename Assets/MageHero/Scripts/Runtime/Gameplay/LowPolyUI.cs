@@ -10,7 +10,7 @@ namespace MageHero
     public static class LowPolyUI
     {
         // Paleta: pizarra azul noche (paneles), ámbar otoñal (acentos), crema (texto), verde bosque / rojo arcilla (resultado).
-        public static readonly Color Backdrop = new Color(0.03f, 0.05f, 0.09f, 0.62f);
+        public static readonly Color Backdrop = new Color(0.03f, 0.05f, 0.09f, 0.34f);   // más transparente: se ve el juego detrás de la tarjeta
         public static readonly Color Slate = new Color(0.17f, 0.23f, 0.31f, 0.94f);
         public static readonly Color SlateDeep = new Color(0.09f, 0.12f, 0.17f, 0.96f);
         public static readonly Color Tile = new Color(0.27f, 0.42f, 0.58f, 1f);
